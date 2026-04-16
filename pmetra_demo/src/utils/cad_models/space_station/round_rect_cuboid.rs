@@ -12,7 +12,7 @@ use super::common::{get_corner_arcs_for_corner_vertices, get_profile_from_corner
 
 /// Rounded Rectangle Cuboid.
 #[derive(Debug, Reflect, Component, Clone, InspectorOptions)]
-#[reflect(InspectorOptions)]
+#[reflect(Component, InspectorOptions)]
 pub struct RoundRectCuboid {
     #[inspector(min = 0.2, speed = 0.1)]
     pub profile_width: f64,

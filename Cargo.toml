@@ -29,7 +29,7 @@ readme = "README.md"
 
 [workspace]
 resolver = "2"
-members = ["crates/*", "pmetra_demo"]
+members = ["crates/*", "pmetra_demo", "mcp-server-rs"]
 
 [dependencies]
 pmetra_internal = { path = "crates/pmetra_internal" }

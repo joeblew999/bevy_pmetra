@@ -14,7 +14,7 @@ pub mod nurbs_surface;
 
 /// Experimental NURBS Surface Solid.
 #[derive(Debug, Reflect, Component, Clone, InspectorOptions)]
-#[reflect(InspectorOptions)]
+#[reflect(Component, InspectorOptions)]
 pub struct ExpNurbs {
     #[inspector(min = 0.1)]
     pub control_point_spacing: f64,

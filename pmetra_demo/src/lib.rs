@@ -8,5 +8,7 @@ pub mod plugins;
 pub mod resources;
 pub mod systems;
 pub mod utils;
+#[cfg(target_arch = "wasm32")]
+pub mod wasm_bridge;
 
 pub use plugin::PmetraDemoPlugin;

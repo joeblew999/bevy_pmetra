@@ -33,12 +33,25 @@ trunk-serve-web:
 
   trunk serve --release --no-default-features
 
-# Serve demo web release build.
+# Serve demo web release build (uses python3 — no extra install needed).
 serve-pmetra-demo-web-release:
-  #!/bin/bash
+  python3 -m http.server 3000 --directory dist
 
-  # Serve dist
-  serve -s dist 
+# ── MCP servers ───────────────────────────────────────────────────────────────
+
+# Start the TypeScript MCP server (requires: bun, node_modules installed).
+mcp-ts:
+  bun run mcp-server/index.ts
+
+# Start the Rust MCP server (stdio transport — use with claude CLI or Desktop).
+mcp-rs:
+  cargo run -p pmetra-mcp-server
+
+# Build the Rust MCP server release binary.
+build-mcp-rs:
+  cargo build -p pmetra-mcp-server --release
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
 
 # Run all tests.
 test:

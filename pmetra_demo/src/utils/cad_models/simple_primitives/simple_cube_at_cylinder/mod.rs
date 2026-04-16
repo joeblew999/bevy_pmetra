@@ -15,7 +15,7 @@ pub mod cylinder;
 
 /// Basic Parametric Station Segment.
 #[derive(Debug, Reflect, Component, Clone, InspectorOptions)]
-#[reflect(InspectorOptions)]
+#[reflect(Component, InspectorOptions)]
 pub struct SimpleCubeAtCylinder {
     #[inspector(min = 0.1)]
     pub cylinder_radius: f64,

@@ -1,0 +1,29 @@
+[package]
+name = "pmetra-mcp-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "pmetra-mcp-server"
+path = "src/main.rs"
+
+[dependencies]
+# MCP protocol
+rmcp = { version = "1.4.0", features = ["server", "transport-io", "macros", "schemars"] }
+schemars = "1.0"
+
+# WebSocket client — talks to the WASM bridge on ws://localhost:9001
+tokio-tungstenite = { version = "0.26", features = ["connect"] }
+futures-util = "0.3"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# JSON + error handling
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -17,7 +17,7 @@ pub mod cabin;
 
 /// Basic Parametric Station Segment.
 #[derive(Debug, Reflect, Component, Clone, InspectorOptions)]
-#[reflect(InspectorOptions)]
+#[reflect(Component, InspectorOptions)]
 pub struct RoundCabinSegment {
     #[inspector(min = 0.1)]
     pub profile_width: f64,

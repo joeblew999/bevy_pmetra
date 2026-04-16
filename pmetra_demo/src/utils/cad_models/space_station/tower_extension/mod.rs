@@ -20,7 +20,7 @@ pub mod cuboid_enclosure;
 
 /// Basic Parametric Station Segment.
 #[derive(Debug, Reflect, Component, Clone, InspectorOptions)]
-#[reflect(InspectorOptions)]
+#[reflect(Component, InspectorOptions)]
 pub struct TowerExtension {
     #[inspector(min = 0.1)]
     pub tower_length: f64,

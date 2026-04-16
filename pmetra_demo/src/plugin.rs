@@ -133,8 +133,45 @@ impl Plugin for PmetraDemoPlugin {
             )
             // Settings Inspector
             .register_type::<PmetraGlobalSettings>()
+            .register_type_data::<PmetraGlobalSettings, ReflectResource>()
             .add_plugins(ResourceInspectorPlugin::<PmetraGlobalSettings>::default())
             // rest...
             .add_systems(Startup, || info!("TruckIntegrationTestPlugin started!"));
+        // JS bridge (WASM only)
+        #[cfg(target_arch = "wasm32")]
+        {
+            use crate::wasm_bridge::{make_spawner_with, BridgeSpawnRegistry};
+            use bevy_pmetra::prelude::GenerateCadModel;
+
+            let mut registry = BridgeSpawnRegistry::default();
+
+            registry.spawners.insert(
+                "TowerExtension".into(),
+                make_spawner_with::<TowerExtension, _>(|world, params, transform| {
+                    world.write_message(GenerateCadModel { params, transform, remove_existing_models: false });
+                }),
+            );
+            registry.spawners.insert(
+                "SimpleCubeAtCylinder".into(),
+                make_spawner_with::<SimpleCubeAtCylinder, _>(|world, params, transform| {
+                    world.write_message(GenerateCadModel { params, transform, remove_existing_models: false });
+                }),
+            );
+            registry.spawners.insert(
+                "RoundCabinSegment".into(),
+                make_spawner_with::<RoundCabinSegment, _>(|world, params, transform| {
+                    world.write_message(GenerateCadModel { params, transform, remove_existing_models: false });
+                }),
+            );
+            registry.spawners.insert(
+                "ExpNurbs".into(),
+                make_spawner_with::<ExpNurbs, _>(|world, params, transform| {
+                    world.write_message(GenerateCadModel { params, transform, remove_existing_models: false });
+                }),
+            );
+
+            app.insert_resource(registry);
+            app.add_plugins(crate::wasm_bridge::WasmBridgePlugin);
+        }
     }
 }
