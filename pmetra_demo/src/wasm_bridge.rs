@@ -31,6 +31,8 @@ use serde_json::Value;
 use wasm_bindgen::prelude::*;
 use web_sys::{MessageEvent, WebSocket};
 
+use crate::truck_loader::{self, StepModel, TruckModel};
+
 // ---------------------------------------------------------------------------
 // Spawn registry — lets plugin.rs register type-specific spawn functions
 // without making the bridge depend on pmetra types directly.
@@ -66,15 +68,36 @@ enum BridgeCommand {
     /// Requires a `BridgeSpawnRegistry` resource to be present (registered in plugin.rs).
     /// {"cmd":"spawn","component":"TowerExtension","value":{"height":2.0},"transform":{"translation":[1,0,0]}}
     Spawn { component: String, value: Value, transform_json: Option<Value>, remove_existing: bool, seq: Option<u64> },
+    /// Load a Truck JSON string, tessellate it, and spawn a mesh entity.
+    /// {"cmd":"load_shape","name":"cube","data":"{...json...}","transform":{"translation":[0,0,0]}}
+    LoadShape { name: String, data: String, transform_json: Option<Value>, seq: Option<u64> },
+    /// Save a TruckModel entity back to Truck JSON.
+    /// {"cmd":"save_shape","name":"cube"}
+    SaveShape { name: String, seq: Option<u64> },
+    /// List all loaded TruckModel entity names.
+    /// {"cmd":"list_shapes"}
+    ListShapes { seq: Option<u64> },
+    /// Load a STEP file string, tessellate, and spawn mesh entities.
+    /// {"cmd":"load_step","name":"cube","data":"ISO-10303-21;..."}
+    LoadStep { name: String, data: String, transform_json: Option<Value>, seq: Option<u64> },
+    /// Save a StepModel entity's raw STEP data back.
+    /// {"cmd":"save_step","name":"cube"}
+    SaveStep { name: String, seq: Option<u64> },
+    /// Delete a loaded shape — despawns entity and removes from localStorage.
+    /// {"cmd":"delete_shape","name":"cube"}
+    DeleteShape { name: String, seq: Option<u64> },
 }
 
 static COMMAND_QUEUE: Mutex<Vec<BridgeCommand>> = Mutex::new(Vec::new());
 /// Serialized resource values — updated by Bevy each PostUpdate, read by JS / WS replies.
 static RESOURCE_CACHE: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+/// Loaded shape names — updated by apply_bridge_commands, read by JS list_shapes().
+static SHAPE_CACHE: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new()); // (name, format)
 
 fn push_cmd(cmd: BridgeCommand) {
-    if let Ok(mut q) = COMMAND_QUEUE.lock() {
-        q.push(cmd);
+    match COMMAND_QUEUE.lock() {
+        Ok(mut q) => q.push(cmd),
+        Err(e) => warn!("wasm_bridge: COMMAND_QUEUE lock poisoned: {e}"),
     }
 }
 
@@ -109,6 +132,79 @@ fn cache_list() -> String {
             serde_json::to_string(&names).unwrap_or_default()
         })
         .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// localStorage persistence — shapes survive page reloads
+// ---------------------------------------------------------------------------
+
+const LS_PREFIX: &str = "pmetra_shape:";
+const LS_STEP_PREFIX: &str = "pmetra_step:";
+
+fn get_local_storage() -> Option<web_sys::Storage> {
+    js_sys::global()
+        .dyn_into::<web_sys::Window>()
+        .ok()?
+        .local_storage()
+        .ok()?
+}
+
+/// Persist a shape's JSON data to localStorage.
+fn persist_shape(name: &str, json: &str, is_step: bool) {
+    let prefix = if is_step { LS_STEP_PREFIX } else { LS_PREFIX };
+    if let Some(storage) = get_local_storage() {
+        if let Err(e) = storage.set_item(&format!("{prefix}{name}"), json) {
+            warn!("wasm_bridge: localStorage set failed: {e:?}");
+        }
+    }
+}
+
+/// Remove a shape from localStorage.
+fn remove_persisted_shape(name: &str, is_step: bool) {
+    let prefix = if is_step { LS_STEP_PREFIX } else { LS_PREFIX };
+    if let Some(storage) = get_local_storage() {
+        storage.remove_item(&format!("{prefix}{name}")).ok();
+    }
+}
+
+/// Read all persisted shapes from localStorage and queue LoadShape/LoadStep commands.
+fn restore_persisted_shapes() {
+    let Some(storage) = get_local_storage() else { return };
+    let len: u32 = match storage.length() {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    let mut count = 0u32;
+    for i in 0..len {
+        let key: String = match storage.key(i) {
+            Ok(Some(k)) => k,
+            _ => continue,
+        };
+        let data: String = match storage.get_item(&key) {
+            Ok(Some(d)) => d,
+            _ => continue,
+        };
+        if let Some(name) = key.strip_prefix(LS_PREFIX) {
+            push_cmd(BridgeCommand::LoadShape {
+                name: name.to_string(),
+                data,
+                transform_json: None,
+                seq: None,
+            });
+            count += 1;
+        } else if let Some(name) = key.strip_prefix(LS_STEP_PREFIX) {
+            push_cmd(BridgeCommand::LoadStep {
+                name: name.to_string(),
+                data,
+                transform_json: None,
+                seq: None,
+            });
+            count += 1;
+        }
+    }
+    if count > 0 {
+        info!("wasm_bridge: restoring {count} persisted shapes from localStorage");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +293,83 @@ pub fn mount_js_namespace() {
     js_sys::Reflect::set(&obj, &"spawn".into(), spawn_fn.as_ref()).ok();
     spawn_fn.forget();
 
+    // pmetra.load_shape("name", '{"boundaries":...}')         → queues load
+    // pmetra.load_shape("name", '{"boundaries":...}', '{"translation":[1,0,0]}')
+    let load_shape_fn = Closure::wrap(Box::new(
+        |name: JsValue, data: JsValue, transform_json: JsValue| {
+            let (Some(n), Some(d)) = (name.as_string(), data.as_string()) else { return };
+            let tj = transform_json
+                .as_string()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok());
+            push_cmd(BridgeCommand::LoadShape {
+                name: n,
+                data: d,
+                transform_json: tj,
+                seq: None,
+            });
+        },
+    ) as Box<dyn FnMut(JsValue, JsValue, JsValue)>);
+    js_sys::Reflect::set(&obj, &"load_shape".into(), load_shape_fn.as_ref()).ok();
+    load_shape_fn.forget();
+
+    // pmetra.save_shape("name") → queues save (result returned via WS)
+    let save_shape_fn = Closure::wrap(Box::new(|name: JsValue| {
+        let Some(n) = name.as_string() else { return };
+        push_cmd(BridgeCommand::SaveShape { name: n, seq: None });
+    }) as Box<dyn FnMut(JsValue)>);
+    js_sys::Reflect::set(&obj, &"save_shape".into(), save_shape_fn.as_ref()).ok();
+    save_shape_fn.forget();
+
+    // pmetra.delete_shape("name") → despawn entity + remove from localStorage
+    let delete_shape_fn = Closure::wrap(Box::new(|name: JsValue| {
+        let Some(n) = name.as_string() else { return };
+        push_cmd(BridgeCommand::DeleteShape { name: n, seq: None });
+    }) as Box<dyn FnMut(JsValue)>);
+    js_sys::Reflect::set(&obj, &"delete_shape".into(), delete_shape_fn.as_ref()).ok();
+    delete_shape_fn.forget();
+
+    // pmetra.list_shapes() → returns JSON array of {name, format} from cache (sync)
+    let list_shapes_fn = Closure::wrap(Box::new(|| -> JsValue {
+        let json = SHAPE_CACHE
+            .lock()
+            .map(|c| {
+                let items: Vec<serde_json::Value> = c.iter()
+                    .map(|(n, f)| serde_json::json!({"name": n, "format": f}))
+                    .collect();
+                serde_json::to_string(&items).unwrap_or_default()
+            })
+            .unwrap_or_default();
+        JsValue::from_str(&json)
+    }) as Box<dyn FnMut() -> JsValue>);
+    js_sys::Reflect::set(&obj, &"list_shapes".into(), list_shapes_fn.as_ref()).ok();
+    list_shapes_fn.forget();
+
+    // pmetra.load_step("name", "ISO-10303-21;...")
+    let load_step_fn = Closure::wrap(Box::new(
+        |name: JsValue, data: JsValue, transform_json: JsValue| {
+            let (Some(n), Some(d)) = (name.as_string(), data.as_string()) else { return };
+            let tj = transform_json
+                .as_string()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok());
+            push_cmd(BridgeCommand::LoadStep {
+                name: n,
+                data: d,
+                transform_json: tj,
+                seq: None,
+            });
+        },
+    ) as Box<dyn FnMut(JsValue, JsValue, JsValue)>);
+    js_sys::Reflect::set(&obj, &"load_step".into(), load_step_fn.as_ref()).ok();
+    load_step_fn.forget();
+
+    // pmetra.save_step("name")
+    let save_step_fn = Closure::wrap(Box::new(|name: JsValue| {
+        let Some(n) = name.as_string() else { return };
+        push_cmd(BridgeCommand::SaveStep { name: n, seq: None });
+    }) as Box<dyn FnMut(JsValue)>);
+    js_sys::Reflect::set(&obj, &"save_step".into(), save_step_fn.as_ref()).ok();
+    save_step_fn.forget();
+
     js_sys::Reflect::set(window.as_ref(), &"pmetra".into(), &obj).ok();
     info!("wasm_bridge: window.pmetra mounted");
 }
@@ -276,15 +449,45 @@ fn handle_ws_message(msg: Value) {
             let remove_existing = msg.get("remove_existing").and_then(|v| v.as_bool()).unwrap_or(false);
             push_cmd(BridgeCommand::Spawn { component, value, transform_json, remove_existing, seq });
         }
+        "load_shape" => {
+            let name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let data = msg.get("data").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let transform_json = msg.get("transform").cloned();
+            push_cmd(BridgeCommand::LoadShape { name, data, transform_json, seq });
+        }
+        "save_shape" => {
+            let name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            push_cmd(BridgeCommand::SaveShape { name, seq });
+        }
+        "list_shapes" => push_cmd(BridgeCommand::ListShapes { seq }),
+        "load_step" => {
+            let name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let data = msg.get("data").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let transform_json = msg.get("transform").cloned();
+            push_cmd(BridgeCommand::LoadStep { name, data, transform_json, seq });
+        }
+        "save_step" => {
+            let name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            push_cmd(BridgeCommand::SaveStep { name, seq });
+        }
+        "delete_shape" => {
+            let name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            push_cmd(BridgeCommand::DeleteShape { name, seq });
+        }
         other => warn!("wasm_bridge: unknown WS cmd '{other}'"),
     }
 }
 
 fn ws_send(msg: &str) {
-    if let Ok(handle) = WS_HANDLE.lock() {
-        if let Some(ws) = handle.as_ref() {
-            ws.send_with_str(msg).ok();
+    match WS_HANDLE.lock() {
+        Ok(handle) => {
+            if let Some(ws) = handle.as_ref() {
+                if let Err(e) = ws.send_with_str(msg) {
+                    warn!("wasm_bridge: ws_send failed: {e:?}");
+                }
+            }
         }
+        Err(e) => warn!("wasm_bridge: WS_HANDLE lock poisoned: {e}"),
     }
 }
 
@@ -374,8 +577,180 @@ fn apply_bridge_commands(world: &mut World) {
                 if let Some(s) = seq { reply["_seq"] = s.into(); }
                 ws_send(&reply.to_string());
             }
+            BridgeCommand::LoadShape { name, data, transform_json, seq } => {
+                let transform = parse_transform_json(transform_json.as_ref());
+                info!("wasm_bridge: load_shape '{}' ({} bytes)", name, data.len());
+                let result = truck_loader::spawn_from_json(world, &name, &data, transform);
+                let mut reply = match &result {
+                    Ok(entity) => {
+                        if let Ok(mut c) = SHAPE_CACHE.lock() {
+                            c.retain(|(n, _)| n != &name);
+                            c.push((name.clone(), "json".to_string()));
+                        }
+                        persist_shape(&name, &data, false);
+                        info!("wasm_bridge: load_shape '{}' → {:?}", name, entity);
+                        serde_json::json!({
+                            "ok": true, "cmd": "load_shape", "name": name,
+                            "entity": format!("{entity:?}"),
+                        })
+                    }
+                    Err(e) => {
+                        warn!("wasm_bridge: load_shape '{}' FAILED: {:#}", name, e);
+                        serde_json::json!({
+                            "ok": false, "cmd": "load_shape", "error": format!("{e:#}"),
+                        })
+                    }
+                };
+                if let Some(s) = seq { reply["_seq"] = s.into(); }
+                ws_send(&reply.to_string());
+            }
+            BridgeCommand::SaveShape { name, seq } => {
+                let entity_opt = {
+                    let mut q = world.query::<(Entity, &TruckModel)>();
+                    q.iter(world).find(|(_, m)| m.name == name).map(|(e, _)| e)
+                };
+                let mut reply = match entity_opt {
+                    Some(entity) => match truck_loader::save_entity_json(world, entity) {
+                        Ok(json) => serde_json::json!({
+                            "ok": true, "cmd": "save_shape", "name": name, "data": json,
+                        }),
+                        Err(e) => serde_json::json!({
+                            "ok": false, "cmd": "save_shape", "error": format!("{e:#}"),
+                        }),
+                    },
+                    None => serde_json::json!({
+                        "ok": false, "cmd": "save_shape", "error": format!("no TruckModel named '{name}'"),
+                    }),
+                };
+                if let Some(s) = seq { reply["_seq"] = s.into(); }
+                ws_send(&reply.to_string());
+            }
+            BridgeCommand::ListShapes { seq } => {
+                let mut q_json = world.query::<&TruckModel>();
+                let mut q_step = world.query::<&StepModel>();
+                let json_names: Vec<Value> = q_json.iter(world)
+                    .map(|m| serde_json::json!({"name": m.name, "format": "json"}))
+                    .collect();
+                let step_names: Vec<Value> = q_step.iter(world)
+                    .map(|m| serde_json::json!({"name": m.name, "format": "step"}))
+                    .collect();
+                let mut all = json_names;
+                all.extend(step_names);
+                // Sync the SHAPE_CACHE from actual ECS state
+                if let Ok(mut c) = SHAPE_CACHE.lock() {
+                    *c = all.iter()
+                        .filter_map(|v| {
+                            let name = v.get("name")?.as_str()?.to_string();
+                            let format = v.get("format")?.as_str()?.to_string();
+                            Some((name, format))
+                        })
+                        .collect();
+                }
+                let mut reply = serde_json::json!({
+                    "ok": true, "cmd": "list_shapes", "value": all,
+                });
+                if let Some(s) = seq { reply["_seq"] = s.into(); }
+                ws_send(&reply.to_string());
+            }
+            BridgeCommand::LoadStep { name, data, transform_json, seq } => {
+                let transform = parse_transform_json(transform_json.as_ref());
+                info!("wasm_bridge: load_step '{}' ({} bytes)", name, data.len());
+                let result = truck_loader::spawn_from_step(world, &name, &data, transform);
+                let mut reply = match &result {
+                    Ok(entities) => {
+                        if let Ok(mut c) = SHAPE_CACHE.lock() {
+                            c.retain(|(n, _)| n != &name);
+                            c.push((name.clone(), "step".to_string()));
+                        }
+                        persist_shape(&name, &data, true);
+                        info!("wasm_bridge: load_step '{}' → {} meshes", name, entities.len());
+                        serde_json::json!({
+                            "ok": true, "cmd": "load_step", "name": name,
+                            "count": entities.len(),
+                        })
+                    }
+                    Err(e) => {
+                        warn!("wasm_bridge: load_step '{}' FAILED: {:#}", name, e);
+                        serde_json::json!({
+                            "ok": false, "cmd": "load_step", "error": format!("{e:#}"),
+                        })
+                    }
+                };
+                if let Some(s) = seq { reply["_seq"] = s.into(); }
+                ws_send(&reply.to_string());
+            }
+            BridgeCommand::SaveStep { name, seq } => {
+                let entity_opt = {
+                    let mut q = world.query::<(Entity, &StepModel)>();
+                    q.iter(world).find(|(_, m)| m.name == name).map(|(e, _)| e)
+                };
+                let mut reply = match entity_opt {
+                    Some(entity) => match truck_loader::save_entity_step(world, entity) {
+                        Ok(data) => serde_json::json!({
+                            "ok": true, "cmd": "save_step", "name": name, "data": data,
+                        }),
+                        Err(e) => serde_json::json!({
+                            "ok": false, "cmd": "save_step", "error": format!("{e:#}"),
+                        }),
+                    },
+                    None => serde_json::json!({
+                        "ok": false, "cmd": "save_step",
+                        "error": format!("no StepModel named '{name}'"),
+                    }),
+                };
+                if let Some(s) = seq { reply["_seq"] = s.into(); }
+                ws_send(&reply.to_string());
+            }
+            BridgeCommand::DeleteShape { name, seq } => {
+                // Despawn TruckModel entities with this name
+                let json_entities: Vec<Entity> = {
+                    let mut q = world.query::<(Entity, &TruckModel)>();
+                    q.iter(world).filter(|(_, m)| m.name == name).map(|(e, _)| e).collect()
+                };
+                // Despawn StepModel entities with this name
+                let step_entities: Vec<Entity> = {
+                    let mut q = world.query::<(Entity, &StepModel)>();
+                    q.iter(world).filter(|(_, m)| m.name == name).map(|(e, _)| e).collect()
+                };
+                let count = json_entities.len() + step_entities.len();
+                for e in json_entities.into_iter().chain(step_entities) {
+                    world.despawn(e);
+                }
+                // Remove from caches and localStorage
+                if let Ok(mut c) = SHAPE_CACHE.lock() {
+                    c.retain(|(n, _)| n != &name);
+                }
+                remove_persisted_shape(&name, false);
+                remove_persisted_shape(&name, true);
+                info!("wasm_bridge: delete_shape '{}' — despawned {count} entities", name);
+                let mut reply = serde_json::json!({
+                    "ok": count > 0,
+                    "cmd": "delete_shape",
+                    "name": name,
+                    "count": count,
+                });
+                if count == 0 { reply["error"] = format!("no shape named '{name}'").into(); }
+                if let Some(s) = seq { reply["_seq"] = s.into(); }
+                ws_send(&reply.to_string());
+            }
         }
     }
+}
+
+/// Parse a `{"translation":[x,y,z]}` JSON value into a Transform.
+fn parse_transform_json(v: Option<&Value>) -> Transform {
+    v.and_then(|v| {
+        let arr = v.get("translation")?.as_array()?;
+        if arr.len() >= 3 {
+            let x = arr[0].as_f64()? as f32;
+            let y = arr[1].as_f64()? as f32;
+            let z = arr[2].as_f64()? as f32;
+            Some(Transform::from_translation(Vec3::new(x, y, z)))
+        } else {
+            None
+        }
+    })
+    .unwrap_or_default()
 }
 
 /// Despawn entities that carry `component_name`.
@@ -443,20 +818,7 @@ fn spawn_via_registry(
     transform_json: Option<&Value>,
     remove_existing: bool,
 ) -> bool {
-    // Resolve transform from JSON {"translation":[x,y,z]} shorthand.
-    let transform = transform_json
-        .and_then(|v| {
-            let arr = v.get("translation")?.as_array()?;
-            if arr.len() >= 3 {
-                let x = arr[0].as_f64()? as f32;
-                let y = arr[1].as_f64()? as f32;
-                let z = arr[2].as_f64()? as f32;
-                Some(Transform::from_translation(Vec3::new(x, y, z)))
-            } else {
-                None
-            }
-        })
-        .unwrap_or_default();
+    let transform = parse_transform_json(transform_json);
 
     if remove_existing {
         despawn_entities(world, registry, component_name, None);
@@ -951,6 +1313,8 @@ impl Plugin for WasmBridgePlugin {
     fn build(&self, app: &mut App) {
         mount_js_namespace();
         connect_websocket("ws://localhost:9001");
+        // Restore shapes saved in localStorage from previous sessions.
+        restore_persisted_shapes();
         // PreUpdate: mutations visible to all Update systems via change detection.
         // PostUpdate: cache reflects the final state of each frame.
         app.add_systems(PreUpdate, apply_bridge_commands)

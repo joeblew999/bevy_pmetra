@@ -9,3 +9,5 @@ dist/
 .playwright-mcp/
 node_modules/
 mcp-server/node_modules/
+# Test screenshots from MCP dog-fooding
+*.png

@@ -26,7 +26,8 @@ and **eyes** (screenshot the result) in the same system, without a native GUI fr
 ## Architecture
 
 ### The bridge — `pmetra_demo/src/wasm_bridge.rs`
-Single file. Exposes `window.pmetra.{set, get, list, screenshot}` as a JS API and handles
+Single file. Exposes `window.pmetra.{set, get, list, screenshot, load_shape, save_shape,
+list_shapes, load_step, save_step, delete_shape, spawn, despawn}` as a JS API and handles
 WebSocket commands from the MCP server. Uses Bevy's reflection system to discover and patch
 any registered type at runtime — zero hardcoded field names.
 
@@ -52,10 +53,24 @@ any registered type at runtime — zero hardcoded field names.
 | | TypeScript (`mcp-server/`) | Rust (`mcp-server-rs/`) |
 |---|---|---|
 | Start | `just mcp-ts` | `just mcp-rs` |
-| Tools | list, get, set, screenshot (via Playwright) | list, get, set, screenshot (via WS) |
+| Tools | list, get, set, screenshot, load_shape, save_shape, list_shapes, load_step, save_step, delete_shape | same |
 | WS broker | hosts port 9001 | hosts port 9001 |
 | MCP transport | stdio | stdio |
-| Extra | Playwright path (opens browser itself) | no extra deps |
+| Extra | Playwright path (opens browser itself), `get_schema` tool | no extra deps |
+
+### Truck CAD loader — `pmetra_demo/src/truck_loader.rs`
+Loads Truck JSON (CompressedShell or CompressedSolid) and STEP files, tessellates B-rep
+geometry into Bevy meshes, and serializes back. Round-trip fidelity: Solid-format inputs
+are saved back as Solids.
+
+Key types: `TruckModel` (JSON, editable, re-tessellatable), `StepModel` (STEP, view-only,
+raw data stored for re-export).
+
+### Persistence — localStorage (single-writer)
+The WASM bridge owns persistence. Shapes are stored at `pmetra_shape:{name}` and
+`pmetra_step:{name}` keys in browser localStorage. On page load, `restore_persisted_shapes()`
+re-queues LoadShape/LoadStep commands. `delete_shape` removes from localStorage.
+The MCP server is a pass-through — it does not write to storage.
 
 Only run one at a time — both host port 9001.
 
@@ -87,9 +102,10 @@ the MCP server if it wasn't running when the page loaded.
 
 | File | Purpose |
 |---|---|
-| `pmetra_demo/src/wasm_bridge.rs` | The bridge — only file that needed changes |
-| `mcp-server-rs/src/main.rs` | Rust MCP server |
-| `mcp-server/index.ts` | TypeScript MCP server |
+| `pmetra_demo/src/wasm_bridge.rs` | The bridge — JS API, WS client, command queue, localStorage persistence |
+| `pmetra_demo/src/truck_loader.rs` | Truck JSON/STEP loader, tessellation, B-rep round-trip |
+| `mcp-server-rs/src/main.rs` | Rust MCP server (recommended) |
+| `mcp-server/index.ts` | TypeScript MCP server (has Playwright path) |
 | `mcp-server/schemas.ts` | TypeScript schemas for all 33 exposed items |
 | `IDEAS.md` | Ecosystem analysis — dimforge, Truck, inferi integration plans |
 | `JUSTFILE` | All task commands |
@@ -109,6 +125,11 @@ All of this was demonstrated live via Playwright MCP in prior sessions:
 - **Physics debug wireframes** toggled
 - **Lighting + background** color changed
 - **Screenshot** returns valid PNG data URL from canvas
+- **Truck JSON** loaded (CompressedShell and CompressedSolid formats), tessellated, rendered
+- **STEP files** loaded, tessellated, rendered (view-only, raw STEP stored for re-export)
+- **Shape persistence** via localStorage — shapes survive page reload, auto-restored on startup
+- **Delete shape** despawns entity, removes from localStorage and SHAPE_CACHE
+- **Save/load round-trip** — load cube.json → save → re-parse → same geometry
 
 ---
 
@@ -117,9 +138,7 @@ All of this was demonstrated live via Playwright MCP in prior sessions:
 | Gap | Fix |
 |---|---|
 | `PmetraGlobalSettings` not exposed | Needs `app.register_type::<PmetraGlobalSettings>()` in pmetra's plugin (their code) |
-| No spawn/despawn via bridge | Would need a command queue + exclusive system — one file change |
 | Deferred rendering | Browser WebGPU has no GBuffer — silently falls back to Forward, not fixable |
-| No per-entity addressing in multi-model scenes | Bridge picks first entity of each type |
 
 ---
 

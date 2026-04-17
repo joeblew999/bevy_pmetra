@@ -36,6 +36,7 @@ gltf = { version = "1.3", features = [
 image = "0.24"
 base64 = "0.21"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 ts-rs = { version = "10", features = ["serde-json-impl"] }
 # truck crates (same source as pmetra_internal uses)
 truck-stepio = { git = "https://github.com/nilaysavant/truck.git", tag = "pmetra.v0.5.0" }
@@ -48,6 +49,4 @@ bevy_pmetra = { path = "../" }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Window", "WebSocket", "MessageEvent", "ErrorEvent", "Document", "Element", "HtmlCanvasElement"] }
-serde_json = "1"
-serde = "1"
+web-sys = { version = "0.3", features = ["Window", "WebSocket", "MessageEvent", "ErrorEvent", "Document", "Element", "HtmlCanvasElement", "Storage"] }

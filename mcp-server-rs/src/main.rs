@@ -177,6 +177,32 @@ struct SetParams {
     value: Value,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct LoadShapeParams {
+    /// Display name for the loaded shape, e.g. "cube".
+    name: String,
+    /// Full Truck JSON content (CompressedShell format).
+    data: String,
+    /// Optional position: {"translation": [x, y, z]}.
+    transform: Option<Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct NameOnlyParams {
+    /// Name of the shape (as used in load_shape/load_step).
+    name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct LoadStepParams {
+    /// Display name for the loaded model, e.g. "bracket".
+    name: String,
+    /// Full STEP file content (ISO-10303-21 format).
+    data: String,
+    /// Optional position: {"translation": [x, y, z]}.
+    transform: Option<Value>,
+}
+
 // ─── MCP server ────────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -245,6 +271,85 @@ impl PmetraServer {
                 .unwrap_or("")
                 .to_string(),
             Err(e) => format!("error: {e}"),
+        }
+    }
+
+    /// Load a Truck JSON shape file into the scene as a rendered mesh.
+    /// The shape can be edited and saved back via save_shape.
+    #[tool(name = "load_shape")]
+    async fn load_shape(&self, params: Parameters<LoadShapeParams>) -> String {
+        let mut cmd = serde_json::json!({
+            "cmd": "load_shape",
+            "name": params.0.name,
+            "data": params.0.data,
+        });
+        if let Some(t) = &params.0.transform { cmd["transform"] = t.clone(); }
+        match self.broker.call(cmd).await {
+            Ok(resp) => resp.to_string(),
+            Err(e) => format!(r#"{{"ok":false,"error":"{e}"}}"#),
+        }
+    }
+
+    /// Save a loaded TruckModel entity back to Truck JSON format.
+    #[tool(name = "save_shape")]
+    async fn save_shape(&self, params: Parameters<NameOnlyParams>) -> String {
+        match self.broker.call(serde_json::json!({
+            "cmd": "save_shape",
+            "name": params.0.name,
+        })).await {
+            Ok(resp) => resp.to_string(),
+            Err(e) => format!(r#"{{"ok":false,"error":"{e}"}}"#),
+        }
+    }
+
+    /// List all loaded Truck shapes (both JSON and STEP).
+    /// Returns name and format for each loaded model.
+    #[tool(name = "list_shapes")]
+    async fn list_shapes(&self) -> String {
+        match self.broker.call(serde_json::json!({ "cmd": "list_shapes" })).await {
+            Ok(resp) => resp.to_string(),
+            Err(e) => format!(r#"{{"ok":false,"error":"{e}"}}"#),
+        }
+    }
+
+    /// Load a STEP file into the scene as rendered mesh(es).
+    /// STEP models are view-only — raw STEP data is stored for re-export.
+    #[tool(name = "load_step")]
+    async fn load_step(&self, params: Parameters<LoadStepParams>) -> String {
+        let mut cmd = serde_json::json!({
+            "cmd": "load_step",
+            "name": params.0.name,
+            "data": params.0.data,
+        });
+        if let Some(t) = &params.0.transform { cmd["transform"] = t.clone(); }
+        match self.broker.call(cmd).await {
+            Ok(resp) => resp.to_string(),
+            Err(e) => format!(r#"{{"ok":false,"error":"{e}"}}"#),
+        }
+    }
+
+    /// Save a loaded StepModel entity's raw STEP data.
+    #[tool(name = "save_step")]
+    async fn save_step(&self, params: Parameters<NameOnlyParams>) -> String {
+        match self.broker.call(serde_json::json!({
+            "cmd": "save_step",
+            "name": params.0.name,
+        })).await {
+            Ok(resp) => resp.to_string(),
+            Err(e) => format!(r#"{{"ok":false,"error":"{e}"}}"#),
+        }
+    }
+
+    /// Delete a loaded shape — despawns entity from the scene and removes
+    /// from browser localStorage. Use list_shapes to see what's loaded.
+    #[tool(name = "delete_shape")]
+    async fn delete_shape(&self, params: Parameters<NameOnlyParams>) -> String {
+        match self.broker.call(serde_json::json!({
+            "cmd": "delete_shape",
+            "name": params.0.name,
+        })).await {
+            Ok(resp) => resp.to_string(),
+            Err(e) => format!(r#"{{"ok":false,"error":"{e}"}}"#),
         }
     }
 }

@@ -269,6 +269,97 @@ server.tool(
   }
 );
 
+// ── Truck shape/STEP file tools ───────────────────────────────────────────────
+
+server.tool(
+  "load_shape",
+  "Load a Truck JSON shape file into the scene as a rendered mesh. " +
+    "Pass the full JSON content as 'data'. Optionally provide a transform.",
+  {
+    name: z.string().describe("Display name for the loaded shape, e.g. 'cube'"),
+    data: z.string().describe("Full Truck JSON content (CompressedShell format)"),
+    transform: z.object({
+      translation: z.tuple([z.number(), z.number(), z.number()]).optional(),
+    }).optional().describe("Optional position: {translation: [x, y, z]}"),
+  },
+  async ({ name, data, transform }) => {
+    const cmd: Record<string, unknown> = { cmd: "load_shape", name, data };
+    if (transform) cmd.transform = transform;
+    const result = await wsSend(cmd);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "save_shape",
+  "Save a loaded TruckModel entity back to Truck JSON format. " +
+    "Returns the full JSON string of the shell geometry.",
+  {
+    name: z.string().describe("Name of the TruckModel to save (as used in load_shape)"),
+  },
+  async ({ name }) => {
+    const result = await wsSend({ cmd: "save_shape", name });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "list_shapes",
+  "List all loaded Truck shapes (both JSON and STEP). " +
+    "Returns name and format for each loaded model.",
+  {},
+  async () => {
+    const result = await wsSend({ cmd: "list_shapes" });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "load_step",
+  "Load a STEP file into the scene as rendered mesh(es). " +
+    "Pass the full STEP file content as 'data'. STEP models are view-only " +
+    "(the raw STEP data is stored for re-export via save_step).",
+  {
+    name: z.string().describe("Display name for the loaded model, e.g. 'bracket'"),
+    data: z.string().describe("Full STEP file content (ISO-10303-21 format)"),
+    transform: z.object({
+      translation: z.tuple([z.number(), z.number(), z.number()]).optional(),
+    }).optional().describe("Optional position: {translation: [x, y, z]}"),
+  },
+  async ({ name, data, transform }) => {
+    const cmd: Record<string, unknown> = { cmd: "load_step", name, data };
+    if (transform) cmd.transform = transform;
+    const result = await wsSend(cmd);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "save_step",
+  "Save a loaded StepModel entity's raw STEP data. " +
+    "Returns the original STEP file content.",
+  {
+    name: z.string().describe("Name of the StepModel to save (as used in load_step)"),
+  },
+  async ({ name }) => {
+    const result = await wsSend({ cmd: "save_step", name });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
+  "delete_shape",
+  "Delete a loaded shape — despawns entity from the scene and removes " +
+    "from browser localStorage. Use list_shapes to see what's loaded.",
+  {
+    name: z.string().describe("Name of the shape to delete (as used in load_shape/load_step)"),
+  },
+  async ({ name }) => {
+    const result = await wsSend({ cmd: "delete_shape", name });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
 // ---------------------------------------------------------------------------
 // Start everything
 // ---------------------------------------------------------------------------

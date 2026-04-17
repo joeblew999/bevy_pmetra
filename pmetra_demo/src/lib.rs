@@ -7,6 +7,7 @@ pub mod plugin;
 pub mod plugins;
 pub mod resources;
 pub mod systems;
+pub mod truck_loader;
 pub mod utils;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_bridge;
