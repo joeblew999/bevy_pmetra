@@ -1,5 +1,16 @@
+# Run all recipes through mise so managed tools (trunk, wrangler, bun, etc.)
+# and env vars (RUSTFLAGS) are always available — no manual activation needed.
+set shell := ["mise", "x", "--", "bash", "-c"]
+
 # Default recipe.
 default: dev-demo
+
+# ── Setup ─────────────────────────────────────────────────────────────────────
+
+# Install all tools and compile targets (run once after cloning).
+setup:
+  mise install
+  rustup target add wasm32-unknown-unknown
 
 # Normal dev run. The most used command.
 dev-demo:
@@ -23,6 +34,9 @@ build-serve-pmetra-demo: build-pmetra-demo-web trunk-serve-web
 # Build the web release version of the pmetra demo.
 build-pmetra-demo-web:
   trunk build --release --no-default-features
+  # Strip trunk's live-reload script (fails on Cloudflare, not needed in production).
+  sed -i '' '/<script>"use strict";/,/<\/script><\/body>/d' dist/index.html
+  echo '</body>' >> dist/index.html
 
 # Serve WASM app (localhost, with live reload).
 trunk-serve-web:
@@ -31,7 +45,7 @@ trunk-serve-web:
 # Serve WASM app on LAN (accessible from phone/tablet on same WiFi).
 # Add ?model=<variant> to URL to select initial model.
 serve-lan:
-  #!/bin/bash
+  #!/usr/bin/env -S mise x -- bash
   IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "localhost")
   echo ""
   echo "  ── Demo URLs (open on phone/desktop, same WiFi) ──"
@@ -82,19 +96,33 @@ cf-deploy: build-pmetra-demo-web cf-upload cf-worker
 
 # Upload all dist/ files to R2 bucket (skips .stage/).
 cf-upload:
-  #!/bin/bash
+  #!/usr/bin/env -S mise x -- bash
   echo "Uploading dist/ to R2 bucket pmetra-assets..."
   cd dist
   find . -type f -not -path './.stage/*' | while read -r file; do
     key="${file#./}"
     echo "  $key"
-    wrangler r2 object put "pmetra-assets/$key" --file "$file"
+    wrangler r2 object put "pmetra-assets/$key" --file "$file" --remote
   done
   echo "Done."
 
 # Deploy the Worker that serves from R2.
 cf-worker:
   wrangler deploy
+
+# Print live demo URLs (Cloudflare).
+cf-urls:
+  @echo ""
+  @echo "  ── Live Demo URLs (Cloudflare) ──"
+  @echo ""
+  @echo "  Default (2 towers):  https://pmetra-demo.gedw99.workers.dev"
+  @echo "  NURBS surface:       https://pmetra-demo.gedw99.workers.dev?model=ExpNurbsSolid"
+  @echo "  Tower extension:     https://pmetra-demo.gedw99.workers.dev?model=TowerExtension"
+  @echo "  Round cabin:         https://pmetra-demo.gedw99.workers.dev?model=RoundCabinSegment"
+  @echo "  Cube + cylinder:     https://pmetra-demo.gedw99.workers.dev?model=SimplCubeAtCylinder"
+  @echo "  Cube + tower:        https://pmetra-demo.gedw99.workers.dev?model=MultiModelsSimplCubeAtCylinderAndTowerExtension"
+  @echo "  2x towers:           https://pmetra-demo.gedw99.workers.dev?model=MultiModels2TowerExtensions"
+  @echo ""
 
 # List all available recipes.
 list:
