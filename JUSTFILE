@@ -22,15 +22,11 @@ build-serve-pmetra-demo: build-pmetra-demo-web trunk-serve-web
 
 # Build the web release version of the pmetra demo.
 build-pmetra-demo-web:
-  #!/bin/bash
-
-  echo "trunk build in release mode..."
-  RUSTFLAGS="--cfg=web_sys_unstable_apis" trunk build --release --no-default-features
-  echo "trunk build in release mode... done!"
+  trunk build --release --no-default-features
 
 # Serve WASM app (localhost, with live reload).
 trunk-serve-web:
-  RUSTFLAGS="--cfg=web_sys_unstable_apis" trunk serve --release --no-default-features
+  trunk serve --release --no-default-features
 
 # Serve WASM app on LAN (accessible from phone/tablet on same WiFi).
 # Add ?model=<variant> to URL to select initial model.
@@ -50,7 +46,7 @@ serve-lan:
   echo ""
   echo "  Touch: 1-finger=orbit, 2-finger=pan, pinch=zoom, tap=select"
   echo ""
-  RUSTFLAGS="--cfg=web_sys_unstable_apis" trunk serve --release --no-default-features --address 0.0.0.0 --port 3000
+  trunk serve --release --no-default-features --address 0.0.0.0 --port 3000
 
 # Build WASM + serve on LAN in one step.
 build-serve-lan: build-pmetra-demo-web serve-lan

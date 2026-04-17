@@ -1,0 +1,15 @@
+[tools]
+rust = "1.93.1"
+just = "latest"
+trunk = "latest"
+bun = "latest"
+wrangler = "latest"
+
+[env]
+# Needed for WebGPU APIs in WASM builds.
+RUSTFLAGS = "--cfg=web_sys_unstable_apis"
+
+# Setup task — run `mise run setup` after cloning.
+[tasks.setup]
+description = "Install WASM compile target"
+run = "rustup target add wasm32-unknown-unknown"
