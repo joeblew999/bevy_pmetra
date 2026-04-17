@@ -17,8 +17,8 @@ build-release-demo:
 build:
   cargo build
 
-# Build and serve the pmetra demo web release.
-build-serve-pmetra-demo: build-pmetra-demo-web serve-pmetra-demo-web-release
+# Build and serve the pmetra demo web (localhost).
+build-serve-pmetra-demo: build-pmetra-demo-web trunk-serve-web
 
 # Build the web release version of the pmetra demo.
 build-pmetra-demo-web:
@@ -28,14 +28,25 @@ build-pmetra-demo-web:
   RUSTFLAGS="--cfg=web_sys_unstable_apis" trunk build --release --no-default-features
   echo "trunk build in release mode... done!"
 
+# Serve WASM app (localhost, with live reload).
 trunk-serve-web:
+  RUSTFLAGS="--cfg=web_sys_unstable_apis" trunk serve --release --no-default-features
+
+# Serve WASM app on LAN (accessible from phone/tablet on same WiFi).
+serve-lan:
   #!/bin/bash
+  IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "localhost")
+  echo ""
+  echo "  Open on your phone:  http://${IP}:3000"
+  echo "  NURBS editor:        http://${IP}:3000?model=ExpNurbsSolid"
+  echo "  Tower:               http://${IP}:3000?model=TowerExtension"
+  echo "  Cabin:               http://${IP}:3000?model=RoundCabinSegment"
+  echo "  Cube+Cylinder:       http://${IP}:3000?model=SimplCubeAtCylinder"
+  echo ""
+  RUSTFLAGS="--cfg=web_sys_unstable_apis" trunk serve --release --no-default-features --address 0.0.0.0 --port 3000
 
-  trunk serve --release --no-default-features
-
-# Serve demo web release build (uses python3 — no extra install needed).
-serve-pmetra-demo-web-release:
-  python3 -m http.server 3000 --directory dist
+# Build WASM + serve on LAN in one step.
+build-serve-lan: build-pmetra-demo-web serve-lan
 
 # ── MCP servers ───────────────────────────────────────────────────────────────
 

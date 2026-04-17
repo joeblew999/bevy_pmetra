@@ -1315,9 +1315,31 @@ impl Plugin for WasmBridgePlugin {
         connect_websocket("ws://localhost:9001");
         // Restore shapes saved in localStorage from previous sessions.
         restore_persisted_shapes();
+        // Apply ?model=X URL query param (e.g. ?model=ExpNurbsSolid).
+        apply_url_model_param();
         // PreUpdate: mutations visible to all Update systems via change detection.
         // PostUpdate: cache reflects the final state of each frame.
         app.add_systems(PreUpdate, apply_bridge_commands)
             .add_systems(PostUpdate, sync_resource_cache);
+    }
+}
+
+/// Read `?model=<variant>` from the URL and queue a set command to switch models.
+fn apply_url_model_param() {
+    let Ok(window) = js_sys::global().dyn_into::<web_sys::Window>() else { return };
+    let href = window.location().href().unwrap_or_default();
+    let Some(query) = href.split('?').nth(1) else { return };
+    for pair in query.split('&') {
+        let mut kv = pair.splitn(2, '=');
+        if kv.next() == Some("model") {
+            if let Some(variant) = kv.next() {
+                info!("wasm_bridge: URL ?model={variant}");
+                push_cmd(BridgeCommand::Set {
+                    resource: "CadGeneratedModelSpawner".to_string(),
+                    value: serde_json::json!({ "selected_params": variant }),
+                    seq: None,
+                });
+            }
+        }
     }
 }
