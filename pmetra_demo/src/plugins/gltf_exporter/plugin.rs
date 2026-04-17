@@ -1,9 +1,9 @@
-use bevy::{prelude::*, tasks::IoTaskPool};
+use bevy::prelude::*;
 use bevy_pmetra::prelude::*;
 
 use crate::plugins::gltf_exporter::gltf::converters::StandardMaterialWithImages;
 
-use super::gltf::{GltfExporter, GltfExporterOutput};
+use super::gltf::GltfExporter;
 
 pub struct GltfExporterPlugin;
 
@@ -45,11 +45,11 @@ pub fn save_mesh(
         let material_w_images =
             StandardMaterialWithImages::from_standard_material(material.clone(), &images);
 
-        let Ok(gltf_exporter) = GltfExporter::new(mesh, material_w_images.clone()) else {
+        let Ok(_gltf_exporter) = GltfExporter::new(mesh, material_w_images.clone()) else {
             error!("Could not create new GltfExporter!");
             continue;
         };
-        let file_name = name.to_string() + ".glb";
+        let _file_name = name.to_string() + ".glb";
 
         // Writing the scene to a new file. Using a task to avoid calling the filesystem APIs in a system
         // as they are blocking

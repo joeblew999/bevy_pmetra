@@ -6,7 +6,7 @@ use bevy_pmetra::{
     re_exports::{
         anyhow::{anyhow, Result},
         truck_modeling::{
-            builder, BSplineSurface, Curve, Face, KnotVec, NurbsSurface, Point3, Shell, Solid,
+            builder, BSplineSurface, Curve, Face, KnotVec, NurbsSurface, Point3, Shell,
             Surface, Vector3, Vector4, Wire,
         },
     },

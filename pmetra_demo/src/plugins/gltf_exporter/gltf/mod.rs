@@ -3,13 +3,10 @@ use std::io::Cursor;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use bevy::{mesh::VertexAttributeValues, prelude::*};
+#[cfg(not(target_arch = "wasm32"))]
 use gltf::json;
 use image::RgbaImage;
 use itertools::Itertools;
-use json::validation::Checked::Valid;
-
-use converters::ToGltfMaterial;
-
 use self::converters::StandardMaterialWithImages;
 
 pub mod converters;

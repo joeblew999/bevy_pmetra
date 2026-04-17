@@ -33,15 +33,22 @@ trunk-serve-web:
   RUSTFLAGS="--cfg=web_sys_unstable_apis" trunk serve --release --no-default-features
 
 # Serve WASM app on LAN (accessible from phone/tablet on same WiFi).
+# Add ?model=<variant> to URL to select initial model.
 serve-lan:
   #!/bin/bash
   IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "localhost")
   echo ""
-  echo "  Open on your phone:  http://${IP}:3000"
-  echo "  NURBS editor:        http://${IP}:3000?model=ExpNurbsSolid"
-  echo "  Tower:               http://${IP}:3000?model=TowerExtension"
-  echo "  Cabin:               http://${IP}:3000?model=RoundCabinSegment"
-  echo "  Cube+Cylinder:       http://${IP}:3000?model=SimplCubeAtCylinder"
+  echo "  ── Demo URLs (open on phone/desktop, same WiFi) ──"
+  echo ""
+  echo "  Default (2 towers):  http://${IP}:3000"
+  echo "  NURBS surface:       http://${IP}:3000?model=ExpNurbsSolid"
+  echo "  Tower extension:     http://${IP}:3000?model=TowerExtension"
+  echo "  Round cabin:         http://${IP}:3000?model=RoundCabinSegment"
+  echo "  Cube + cylinder:     http://${IP}:3000?model=SimplCubeAtCylinder"
+  echo "  Cube + tower:        http://${IP}:3000?model=MultiModelsSimplCubeAtCylinderAndTowerExtension"
+  echo "  2x towers:           http://${IP}:3000?model=MultiModels2TowerExtensions"
+  echo ""
+  echo "  Touch: 1-finger=orbit, 2-finger=pan, pinch=zoom, tap=select"
   echo ""
   RUSTFLAGS="--cfg=web_sys_unstable_apis" trunk serve --release --no-default-features --address 0.0.0.0 --port 3000
 

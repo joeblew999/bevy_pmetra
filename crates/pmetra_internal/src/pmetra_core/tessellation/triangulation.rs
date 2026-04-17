@@ -1,4 +1,4 @@
-use rustc_hash::FxHashMap;
+
 use truck_meshalgo::prelude::triangulation::SP;
 #[cfg(not(target_arch = "wasm32"))]
 use truck_meshalgo::tessellation::triangulation::rayon::iter::{
