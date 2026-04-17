@@ -1,5 +1,8 @@
 use bevy::{
-    input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
+    input::{
+        mouse::{MouseMotion, MouseScrollUnit, MouseWheel},
+        touch::Touches,
+    },
     prelude::*,
 };
 use bevy_rapier3d::prelude::*;
@@ -14,6 +17,7 @@ pub fn orbit_cam_custom_input_map_controller(
     mut mouse_motion_events: MessageReader<MouseMotion>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    touches: Res<Touches>,
     controllers: Query<&OrbitCameraController>,
 ) {
     // Can only control one camera at a time.
@@ -30,6 +34,7 @@ pub fn orbit_cam_custom_input_map_controller(
         ..
     } = *controller;
 
+    // ── Mouse input (desktop) ─────────────────────────────────────────────
     let mut cursor_delta = Vec2::ZERO;
     for event in mouse_motion_events.read() {
         cursor_delta += event.delta;
@@ -56,6 +61,42 @@ pub fn orbit_cam_custom_input_map_controller(
         };
         scalar *= 1.0 - scroll_amount * mouse_wheel_zoom_sensitivity;
     }
+
+    // ── Touch input (mobile) ──────────────────────────────────────────────
+    let active_touches: Vec<_> = touches.iter().collect();
+    match active_touches.len() {
+        1 => {
+            // Single finger drag → orbit
+            let delta = active_touches[0].delta();
+            if delta != Vec2::ZERO {
+                events.write(ControlMessage::Orbit(
+                    mouse_rotate_sensitivity * delta,
+                ));
+            }
+        }
+        2 => {
+            let t0 = active_touches[0];
+            let t1 = active_touches[1];
+
+            // Two-finger drag → pan (average of both deltas)
+            let avg_delta = (t0.delta() + t1.delta()) / 2.0;
+            if avg_delta != Vec2::ZERO {
+                events.write(ControlMessage::TranslateTarget(
+                    mouse_translate_sensitivity * avg_delta,
+                ));
+            }
+
+            // Pinch → zoom (change in distance between fingers)
+            let prev_dist = (t0.previous_position() - t1.previous_position()).length();
+            let cur_dist = (t0.position() - t1.position()).length();
+            if prev_dist > 0.0 {
+                let pinch_ratio = prev_dist / cur_dist;
+                scalar *= pinch_ratio;
+            }
+        }
+        _ => {}
+    }
+
     events.write(ControlMessage::Zoom(scalar));
 }
 
