@@ -10,4 +10,8 @@ dist/
 node_modules/
 mcp-server/node_modules/
 # Test screenshots from MCP dog-fooding
-*.png
+/*.png
+# Claude Code local config
+.claude/
+# Root assets is a duplicate of pmetra_demo/assets — only commit the latter
+/assets/
