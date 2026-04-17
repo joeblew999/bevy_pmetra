@@ -37,6 +37,11 @@ image = "0.24"
 base64 = "0.21"
 serde = { version = "1", features = ["derive"] }
 ts-rs = { version = "10", features = ["serde-json-impl"] }
+# truck crates (same source as pmetra_internal uses)
+truck-stepio = { git = "https://github.com/nilaysavant/truck.git", tag = "pmetra.v0.5.0" }
+truck-polymesh = { git = "https://github.com/nilaysavant/truck.git", tag = "pmetra.v0.5.0" }
+truck-geotrait = { git = "https://github.com/nilaysavant/truck.git", tag = "pmetra.v0.5.0" }
+truck-assembly = { git = "https://github.com/nilaysavant/truck.git", tag = "pmetra.v0.5.0" }
 # workspace crates...
 bevy_pmetra = { path = "../" }
 
