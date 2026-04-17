@@ -13,5 +13,7 @@ mcp-server/node_modules/
 /*.png
 # Claude Code local config
 .claude/
+# Wrangler local state
+.wrangler/
 # Root assets is a duplicate of pmetra_demo/assets — only commit the latter
 /assets/

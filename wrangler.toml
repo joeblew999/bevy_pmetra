@@ -1,0 +1,7 @@
+name = "pmetra-demo"
+main = "workers/static-site.js"
+compatibility_date = "2025-01-01"
+
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "pmetra-assets"

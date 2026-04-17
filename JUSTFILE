@@ -73,9 +73,28 @@ test:
 
 # ── Cloudflare deployment ─────────────────────────────────────────────────────
 
-# Deploy WASM app to Cloudflare Pages.
-cf-deploy: build-pmetra-demo-web
-  wrangler pages deploy dist/ --project-name pmetra-demo
+# First-time setup: create R2 bucket (run once).
+cf-init:
+  wrangler r2 bucket create pmetra-assets
+
+# Upload dist/ files to R2 and deploy the Worker.
+cf-deploy: build-pmetra-demo-web cf-upload cf-worker
+
+# Upload all dist/ files to R2 bucket (skips .stage/).
+cf-upload:
+  #!/bin/bash
+  echo "Uploading dist/ to R2 bucket pmetra-assets..."
+  cd dist
+  find . -type f -not -path './.stage/*' | while read -r file; do
+    key="${file#./}"
+    echo "  $key"
+    wrangler r2 object put "pmetra-assets/$key" --file "$file"
+  done
+  echo "Done."
+
+# Deploy the Worker that serves from R2.
+cf-worker:
+  wrangler deploy
 
 # List all available recipes.
 list:

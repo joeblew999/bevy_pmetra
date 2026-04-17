@@ -1,4 +1,5 @@
 [tools]
+node = "lts"
 rust = "1.93.1"
 just = "latest"
 trunk = "latest"
