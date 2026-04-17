@@ -285,6 +285,54 @@ Thats it! You can now see the magic:
 | 0.14 | `v0.2.x`           |
 | 0.13 | `v0.1.0`           |
 
+## Quick Start
+
+Requires [mise](https://mise.jdx.dev/) (manages all tool versions automatically).
+
+```bash
+mise install          # installs rust, trunk, just, bun, wrangler
+mise run setup        # adds wasm32 compile target
+```
+
+### Run
+
+```bash
+just dev-demo         # native desktop (fastest iteration)
+just trunk-serve-web  # WASM on localhost with live reload
+just serve-lan        # WASM on LAN (phone/tablet testing)
+```
+
+### Deploy
+
+```bash
+just cf-deploy        # build + deploy to Cloudflare Pages
+```
+
+Or connect this repo to Cloudflare Pages for auto-deploy on push:
+- Build command: `trunk build --release --no-default-features`
+- Build output directory: `dist`
+- Environment variable: `RUSTFLAGS` = `--cfg=web_sys_unstable_apis`
+
+### MCP (AI-driven CAD)
+
+```bash
+just mcp-rs           # start Rust MCP server (recommended)
+just mcp-ts           # start TypeScript MCP server (alternative)
+```
+
+See [CLAUDE.md](CLAUDE.md) for the full AI bridge architecture.
+
+### URL Parameters
+
+The WASM app accepts query parameters for configuration:
+
+| Parameter | Example | Description |
+| --------- | ------- | ----------- |
+| `model`   | `?model=ExpNurbsSolid` | Select initial model variant |
+| `ws`      | `?ws=wss://your-worker.dev` | WebSocket broker URL (default: `ws://localhost:9001`) |
+
+Available models: `ExpNurbsSolid`, `TowerExtension`, `RoundCabinSegment`, `SimplCubeAtCylinder`, `MultiModels2TowerExtensions`, `MultiModelsSimplCubeAtCylinderAndTowerExtension`
+
 [bevy-website]: https://bevyengine.org/
 [truck-github]: https://github.com/ricosjp/truck
 [pmetra-demo-web]: https://pmetra.nilay.cc/
