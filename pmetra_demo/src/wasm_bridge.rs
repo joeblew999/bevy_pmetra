@@ -1312,11 +1312,22 @@ pub struct WasmBridgePlugin;
 impl Plugin for WasmBridgePlugin {
     fn build(&self, app: &mut App) {
         mount_js_namespace();
-        connect_websocket("ws://localhost:9001");
+        let params = read_url_params();
+        // WebSocket: ?ws=wss://your-worker.dev or default to localhost.
+        let ws_url = params.get("ws").cloned()
+            .unwrap_or_else(|| "ws://localhost:9001".to_string());
+        connect_websocket(&ws_url);
         // Restore shapes saved in localStorage from previous sessions.
         restore_persisted_shapes();
         // Apply ?model=X URL query param (e.g. ?model=ExpNurbsSolid).
-        apply_url_model_param();
+        if let Some(variant) = params.get("model") {
+            info!("wasm_bridge: URL ?model={variant}");
+            push_cmd(BridgeCommand::Set {
+                resource: "CadGeneratedModelSpawner".to_string(),
+                value: serde_json::json!({ "selected_params": variant }),
+                seq: None,
+            });
+        }
         // PreUpdate: mutations visible to all Update systems via change detection.
         // PostUpdate: cache reflects the final state of each frame.
         app.add_systems(PreUpdate, apply_bridge_commands)
@@ -1324,22 +1335,17 @@ impl Plugin for WasmBridgePlugin {
     }
 }
 
-/// Read `?model=<variant>` from the URL and queue a set command to switch models.
-fn apply_url_model_param() {
-    let Ok(window) = js_sys::global().dyn_into::<web_sys::Window>() else { return };
+/// Parse URL query parameters into a key-value map.
+fn read_url_params() -> std::collections::HashMap<String, String> {
+    let mut params = std::collections::HashMap::new();
+    let Ok(window) = js_sys::global().dyn_into::<web_sys::Window>() else { return params };
     let href = window.location().href().unwrap_or_default();
-    let Some(query) = href.split('?').nth(1) else { return };
+    let Some(query) = href.split('?').nth(1) else { return params };
     for pair in query.split('&') {
         let mut kv = pair.splitn(2, '=');
-        if kv.next() == Some("model") {
-            if let Some(variant) = kv.next() {
-                info!("wasm_bridge: URL ?model={variant}");
-                push_cmd(BridgeCommand::Set {
-                    resource: "CadGeneratedModelSpawner".to_string(),
-                    value: serde_json::json!({ "selected_params": variant }),
-                    seq: None,
-                });
-            }
+        if let (Some(key), Some(val)) = (kv.next(), kv.next()) {
+            params.insert(key.to_string(), val.to_string());
         }
     }
+    params
 }

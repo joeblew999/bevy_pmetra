@@ -75,18 +75,12 @@ build-mcp-rs:
 test:
   cargo test
 
-# Build for Vercel deployment.
-vercel-build: build-pmetra-demo-web
-  vercel build
+# ── Cloudflare deployment ─────────────────────────────────────────────────────
 
-# Build and deploy demo WASM via Vercel.
-vercel-deploy: vercel-build
-  vercel deploy --prebuilt
+# Deploy WASM app to Cloudflare Pages.
+cf-deploy: build-pmetra-demo-web
+  wrangler pages deploy dist/ --project-name pmetra-demo
 
 # List all available recipes.
 list:
   just --list
-
-# This is a comment.
-example-recipe:
-  @echo 'This is example recipe.'
