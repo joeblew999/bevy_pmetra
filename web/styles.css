@@ -38,14 +38,40 @@ body {
   }
 }
 
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden;
+}
+
 canvas {
-  min-height: 720px;
-  max-width: 100%;
-  box-shadow: 0 0 10px 0 rgba(0, 0, 0, 0.5);
-  outline: #0015ff;
-  -webkit-tap-highlight-color: rgb(8, 0, 255); /* mobile webkit */
+  display: block;
+  width: 100%;
+  height: 100%;
+  -webkit-tap-highlight-color: rgb(8, 0, 255);
 }
 
 #bevy {
   z-index: 2;
+}
+
+.stage {
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 0;
+}
+
+.stage .loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
 }

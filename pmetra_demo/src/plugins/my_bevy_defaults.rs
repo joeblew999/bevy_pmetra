@@ -47,6 +47,7 @@ impl MyBevyDefaultPluginsConfig {
                     title: self.game_title.clone(),
                     canvas: self.wasm_canvas_selector.clone(),
                     present_mode: self.present_mode,
+                    fit_canvas_to_parent: true,
                     ..default()
                 }),
                 ..default()

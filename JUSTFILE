@@ -37,6 +37,19 @@ build-pmetra-demo-web:
   # Strip trunk's live-reload script (fails on Cloudflare, not needed in production).
   sed -i '' '/<script>"use strict";/,/<\/script><\/body>/d' dist/index.html
   echo '</body>' >> dist/index.html
+  # Strip integrity="..." attrs — wasm-opt (below) rewrites the .wasm so the SRI
+  # hashes computed by trunk would no longer match, blocking the script in-browser.
+  sed -i '' 's/ integrity="[^"]*"//g' dist/index.html
+  # Size-optimize WASM with system binaryen (newer than trunk's bundled copy,
+  # handles Bevy's modern WASM features).
+  for f in dist/*_bg.wasm; do \
+    orig=$(du -h "$f" | cut -f1); \
+    wasm-opt -Oz --enable-bulk-memory --enable-reference-types --enable-sign-ext \
+      --enable-mutable-globals --enable-nontrapping-float-to-int \
+      --enable-multivalue --enable-simd --enable-bulk-memory-opt \
+      -o "$f.opt" "$f" && mv "$f.opt" "$f"; \
+    echo "  wasm-opt: $(basename $f): $orig -> $(du -h $f | cut -f1)"; \
+  done
 
 # Serve WASM app (localhost, with live reload).
 trunk-serve-web:
@@ -109,6 +122,14 @@ cf-upload:
 # Deploy the Worker that serves from R2.
 cf-worker:
   wrangler deploy
+
+# Run the Worker locally against the REMOTE R2 bucket — same code path as prod.
+# Catches Worker/cache/encoding bugs before deploying. Serves on http://localhost:8787.
+cf-dev:
+  wrangler dev --remote
+
+# Build + run locally in Worker/R2 parity mode. Uploads dist/ to R2 first.
+cf-dev-build: build-pmetra-demo-web cf-upload cf-dev
 
 # Print live demo URLs (Cloudflare).
 cf-urls:

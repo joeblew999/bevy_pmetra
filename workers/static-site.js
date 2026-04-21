@@ -18,6 +18,9 @@ export default {
     const url = new URL(request.url);
     let key = url.pathname.slice(1) || 'index.html';
 
+    const ext = '.' + key.split('.').pop();
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+
     const object = await env.ASSETS.get(key);
     if (!object) {
       // Try index.html for SPA routing.
@@ -28,14 +31,14 @@ export default {
       });
     }
 
-    const ext = '.' + key.split('.').pop();
-    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
     const headers = new Headers();
     headers.set('content-type', contentType);
-    // Cache WASM and JS aggressively (hashed filenames).
+    // Cache WASM and JS for a day. Filenames are content-hashed, but keep the
+    // TTL short enough that a bad deploy recovers without a manual cache-bust
+    // (workers.dev cache can't be purged via the API).
     if (ext === '.wasm' || ext === '.js') {
-      headers.set('cache-control', 'public, max-age=31536000, immutable');
+      headers.set('cache-control', 'public, max-age=86400');
+      headers.set('vary', 'Accept-Encoding');
     } else {
       headers.set('cache-control', 'public, max-age=60');
     }

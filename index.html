@@ -6,12 +6,12 @@
       name="viewport"
       content="width=device-width, initial-scale=1, user-scalable=no"
     />
-    <title>pmetra - Parametric Modelling for Bevy Engine</title>
+    <title>Parametric Modelling demo</title>
     <link data-trunk rel="copy-dir" href="assets" />
     <link data-trunk rel="inline" href="web/styles.css" />
     <link data-trunk rel="tailwind-css" href="web/tailwind.css" />
   </head>
-  <body class="bg-slate-900 w-full min-h-screen flex flex-col items-stretch">
+  <body class="bg-slate-900 w-full h-screen flex flex-col items-stretch overflow-hidden">
     <link
       data-trunk
       rel="rust"
@@ -23,15 +23,8 @@
       <div
         class="container mx-auto flex flex-wrap px-5 py-2.5 flex-col md:flex-row items-center"
       >
-        <a
-          class="flex title-font font-medium items-center text-white mb-4 md:mb-0"
-        >
-          <span class="ml-3 text-xl">pmetra</span>
-        </a>
-        <span
-          class="md:mr-auto md:ml-4 md:py-1 md:pl-4 md:border-l md:border-gray-700 flex flex-wrap items-center text-base justify-center"
-        >
-          Parametric Modelling for Bevy Engine
+        <span class="text-white text-xl font-medium">
+          Parametric Modelling demo
         </span>
       </div>
     </header>
@@ -90,44 +83,13 @@
         </button>
       </div>
     </nav>
-    <main
-      class="flex flex-col items-center justify-center relative my-8"
-      style="min-height: 720px"
-    >
-      <div class="flex flex-col items-center justify-center absolute">
+    <main class="stage">
+      <div class="loading">
         <div class="lds-dual-ring"></div>
         <div class="text-white mt-4">LOADING</div>
       </div>
       <canvas id="bevy">Javascript and support for canvas is required</canvas>
-      <div class="flex-col items-center justify-center text-center mt-6">
-        <div class="text-gray-400">
-          With ❤️ using
-          <a
-            class="text-indigo-400"
-            href="https://bevyengine.org/"
-            rel="noopener noreferrer"
-            target="_blank"
-            >Bevy Engine</a
-          >,
-          <a
-            class="text-indigo-400"
-            href="https://github.com/ricosjp/truck"
-            rel="noopener noreferrer"
-            target="_blank"
-            >Truck</a
-          >
-          and
-          <a
-            class="text-indigo-400"
-            href="https://www.rust-lang.org/"
-            rel="noopener noreferrer"
-            target="_blank"
-            >Rust 🦀</a
-          >
-        </div>
-      </div>
     </main>
-    <div class="mt-auto"></div>
     <script>
       (function () {
         const buttons = document.querySelectorAll(".demo-btn");
@@ -158,6 +120,8 @@
         function enableWhenReady() {
           if (window.pmetra && typeof window.pmetra.get === "function") {
             buttons.forEach((b) => (b.disabled = false));
+            const loading = document.querySelector(".loading");
+            if (loading) loading.style.display = "none";
             try {
               const current = JSON.parse(
                 window.pmetra.get("CadGeneratedModelSpawner") || "{}"
