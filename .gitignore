@@ -8,7 +8,6 @@ dist/
 .DS_Store
 .playwright-mcp/
 node_modules/
-mcp-server/node_modules/
 # Test screenshots from MCP dog-fooding
 /*.png
 # Claude Code local config

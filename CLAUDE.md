@@ -9,7 +9,7 @@ the geometry changes.
 ```
 user / AI intent
       ↓
-MCP server (Rust or TypeScript)
+MCP server (Rust, mcp-server-rs/)
       ↓ WebSocket (port 9001)
 WASM bridge (wasm_bridge.rs)
       ↓ Bevy ECS reflection
@@ -48,15 +48,19 @@ any registered type at runtime — zero hardcoded field names.
 **Screenshot:** `window.pmetra.screenshot()` and WS `{cmd:"screenshot"}` both call
 `HtmlCanvasElement::to_data_url_with_type("image/png")` — returns base64 PNG data URL.
 
-### MCP servers — two implementations, same protocol
+### MCP server — `mcp-server-rs/src/main.rs`
 
-| | TypeScript (`mcp-server/`) | Rust (`mcp-server-rs/`) |
-|---|---|---|
-| Start | `just mcp-ts` | `just mcp-rs` |
-| Tools | list, get, set, screenshot, load_shape, save_shape, list_shapes, load_step, save_step, delete_shape | same |
-| WS broker | hosts port 9001 | hosts port 9001 |
-| MCP transport | stdio | stdio |
-| Extra | Playwright path (opens browser itself), `get_schema` tool | no extra deps |
+Single Rust binary, four roles on one port (9001):
+1. **WebSocket broker** — WASM app connects to `/ws`, commands routed by sequence number
+2. **HTTP API** — `GET /health`, `POST /call` (same contract as Cloudflare Worker)
+3. **MCP server** — JSON-RPC over stdio (Claude Desktop / CLI connect here)
+4. **Static file server** (optional, `--features embed-ui`) — serves embedded dist/ files
+
+| | |
+|---|---|
+| Start | `just mcp-rs` (MCP+HTTP+WS) or `just mcp-broker` (HTTP+WS only) |
+| Tools | list, get, set, screenshot, get_schema, load_shape, save_shape, list_shapes, load_step, save_step, delete_shape, simulate_touch |
+| End-user binary | `just build-release` → single file, open http://localhost:9001 |
 
 ### Truck CAD loader — `pmetra_demo/src/truck_loader.rs`
 Loads Truck JSON (CompressedShell or CompressedSolid) and STEP files, tessellates B-rep
@@ -72,29 +76,37 @@ The WASM bridge owns persistence. Shapes are stored at `pmetra_shape:{name}` and
 re-queues LoadShape/LoadStep commands. `delete_shape` removes from localStorage.
 The MCP server is a pass-through — it does not write to storage.
 
-Only run one at a time — both host port 9001.
-
 ### WASM app
-Built with `trunk build --release`, served with `just serve-pmetra-demo-web-release`.
-On startup the WASM connects OUT to `ws://localhost:9001`. If nothing is there, it silently
+Built with `trunk build --release`. Auto-detects deployment mode:
+- **Local dev**: trunk serve on :3000, connects to `ws://localhost:9001/ws`
+- **End-user binary**: served from embedded dist/ at :9001, connects to `ws://localhost:9001/ws`
+- **Cloudflare**: served from R2, connects to `wss://<host>/ws` via Durable Object
+
+On startup the WASM connects OUT to the WebSocket endpoint. If nothing is there, it silently
 continues — the JS API still works via Playwright.
+
+### Cloudflare deployment — `workers/worker.js`
+CF Worker + Durable Object (`PmetraBroker`) with WebSocket Hibernation API.
+Serves static files from R2, relays MCP commands via DO. Same `/health`, `/call`, `/ws`
+API as the local Rust server — tests work on both (`just cf-test`).
 
 ---
 
 ## Start sequence
 
 ```bash
-# Terminal 1 — build and serve the WASM app
-just build-pmetra-demo-web
-just serve-pmetra-demo-web-release   # http://127.0.0.1:3000
+# Local dev (two terminals)
+just dev-all     # starts WS broker + trunk serve on :3000
+                 # open http://127.0.0.1:3000?model=TowerExtension
 
-# Terminal 2 — MCP server (pick one)
-just mcp-rs    # Rust server (recommended — no Node.js)
-just mcp-ts    # TypeScript server (has Playwright path too)
+# End-user single binary
+just build-release   # builds WASM + embeds into Rust binary
+./target/release/pmetra-mcp-server   # open http://localhost:9001
+
+# Cloudflare
+just cf-deploy   # builds WASM → R2 → deploys Worker + DO
+just cf-test 443 pmetra-demo.gedw99.workers.dev https
 ```
-
-The WASM app connects to the MCP server on startup. Reload the browser after starting
-the MCP server if it wasn't running when the page loaded.
 
 ---
 
@@ -104,9 +116,9 @@ the MCP server if it wasn't running when the page loaded.
 |---|---|
 | `pmetra_demo/src/wasm_bridge.rs` | The bridge — JS API, WS client, command queue, localStorage persistence |
 | `pmetra_demo/src/truck_loader.rs` | Truck JSON/STEP loader, tessellation, B-rep round-trip |
-| `mcp-server-rs/src/main.rs` | Rust MCP server (recommended) |
-| `mcp-server/index.ts` | TypeScript MCP server (has Playwright path) |
-| `mcp-server/schemas.ts` | TypeScript schemas for all 33 exposed items |
+| `mcp-server-rs/src/main.rs` | Rust MCP server — WS broker, HTTP API, MCP stdio, optional embedded UI |
+| `workers/worker.js` | Cloudflare Worker + Durable Object (WS relay, R2 static files) |
+| `wrangler.toml` | CF Worker config (R2 bucket, DO migration) |
 | `IDEAS.md` | Ecosystem analysis — dimforge, Truck, inferi integration plans |
 | `JUSTFILE` | All task commands |
 

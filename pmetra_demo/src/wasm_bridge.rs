@@ -7,7 +7,7 @@
 //!   window.pmetra.get("CadGeneratedModelSpawner")  // → JSON string
 //!   window.pmetra.list()                            // → JSON array of resource names
 //!
-//! MODE 2 — MCP WebSocket (connects to ws://localhost:9001 if available):
+//! MODE 2 — MCP WebSocket (connects to ws://localhost:9001/ws if available):
 //!   Server sends: {"cmd":"set","resource":"CadGeneratedModelSpawner","value":{"selected_params":"ExpNurbsSolid"}}
 //!   Server sends: {"cmd":"get","resource":"CadGeneratedModelSpawner"}
 //!   Server sends: {"cmd":"list"}
@@ -90,6 +90,10 @@ enum BridgeCommand {
     /// from canvas top-left). If `end_x`/`end_y` equal start, behaves as a tap.
     /// {"cmd":"simulate_touch","x":100,"y":200,"end_x":150,"end_y":200,"duration_ms":300}
     SimulateTouch { x: f64, y: f64, end_x: f64, end_y: f64, duration_ms: f64, seq: Option<u64> },
+    /// Return field-level type info for a registered type (or all types if name is "*").
+    /// {"cmd":"schema","name":"TowerExtension"}   → single type schema
+    /// {"cmd":"schema"}  or  {"cmd":"schema","name":"*"}  → all registered schemas
+    Schema { name: String, seq: Option<u64> },
 }
 
 static COMMAND_QUEUE: Mutex<Vec<BridgeCommand>> = Mutex::new(Vec::new());
@@ -97,6 +101,8 @@ static COMMAND_QUEUE: Mutex<Vec<BridgeCommand>> = Mutex::new(Vec::new());
 static RESOURCE_CACHE: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 /// Loaded shape names — updated by apply_bridge_commands, read by JS list_shapes().
 static SHAPE_CACHE: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new()); // (name, format)
+/// Type schemas — populated once from Bevy's TypeRegistry, read by JS schema() and WS.
+static SCHEMA_CACHE: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 
 fn push_cmd(cmd: BridgeCommand) {
     match COMMAND_QUEUE.lock() {
@@ -297,6 +303,15 @@ pub fn mount_js_namespace() {
     js_sys::Reflect::set(&obj, &"spawn".into(), spawn_fn.as_ref()).ok();
     spawn_fn.forget();
 
+    // pmetra.schema("TowerExtension") → JSON schema for one type (sync from cache)
+    // pmetra.schema()  or  pmetra.schema("*") → all schemas
+    let schema_fn = Closure::wrap(Box::new(|name: JsValue| -> JsValue {
+        let n = name.as_string().unwrap_or_else(|| "*".to_string());
+        JsValue::from_str(&schema_get(&n))
+    }) as Box<dyn FnMut(JsValue) -> JsValue>);
+    js_sys::Reflect::set(&obj, &"schema".into(), schema_fn.as_ref()).ok();
+    schema_fn.forget();
+
     // pmetra.load_shape("name", '{"boundaries":...}')         → queues load
     // pmetra.load_shape("name", '{"boundaries":...}', '{"translation":[1,0,0]}')
     let load_shape_fn = Closure::wrap(Box::new(
@@ -384,14 +399,24 @@ pub fn mount_js_namespace() {
 
 // Keep the WebSocket alive for the lifetime of the app.
 static WS_HANDLE: Mutex<Option<WebSocket>> = Mutex::new(None);
+/// Target URL for WS reconnect.
+static WS_URL: Mutex<Option<String>> = Mutex::new(None);
 
-pub fn connect_websocket(url: &str) {
+/// Try to open a WebSocket connection. If it fails or drops, the reconnect
+/// timer (`start_ws_reconnect_timer`) will retry automatically.
+fn try_ws_connect(url: &str) {
+    // Don't connect if we already have a live connection.
+    if let Ok(handle) = WS_HANDLE.lock() {
+        if let Some(ws) = handle.as_ref() {
+            if ws.ready_state() == WebSocket::OPEN || ws.ready_state() == WebSocket::CONNECTING {
+                return;
+            }
+        }
+    }
+
     let ws = match WebSocket::new(url) {
         Ok(ws) => ws,
-        Err(_) => {
-            info!("wasm_bridge: WS connect skipped (no server at {})", url);
-            return;
-        }
+        Err(_) => return, // silently skip — reconnect timer will retry
     };
 
     // onmessage → parse JSON command → push to queue
@@ -405,12 +430,19 @@ pub fn connect_websocket(url: &str) {
     ws.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
     onmessage.forget();
 
-    let onerror = Closure::wrap(
-        Box::new(move |_| info!("wasm_bridge: WS not connected (MCP server not running)"))
-            as Box<dyn FnMut(JsValue)>,
-    );
+    let onerror = Closure::wrap(Box::new(move |_| {
+        // Clear handle so reconnect timer can retry.
+        if let Ok(mut h) = WS_HANDLE.lock() { *h = None; }
+    }) as Box<dyn FnMut(JsValue)>);
     ws.set_onerror(Some(onerror.as_ref().unchecked_ref()));
     onerror.forget();
+
+    let onclose = Closure::wrap(Box::new(move |_: JsValue| {
+        info!("wasm_bridge: WS disconnected — will auto-reconnect");
+        if let Ok(mut h) = WS_HANDLE.lock() { *h = None; }
+    }) as Box<dyn FnMut(JsValue)>);
+    ws.set_onclose(Some(onclose.as_ref().unchecked_ref()));
+    onclose.forget();
 
     let onopen = Closure::wrap(Box::new(move || {
         info!("wasm_bridge: WS connected to MCP server");
@@ -421,6 +453,35 @@ pub fn connect_websocket(url: &str) {
     if let Ok(mut handle) = WS_HANDLE.lock() {
         *handle = Some(ws);
     }
+}
+
+/// Initial connection + periodic reconnect timer (every 3s).
+pub fn connect_websocket(url: &str) {
+    // Store URL for reconnect timer.
+    if let Ok(mut u) = WS_URL.lock() { *u = Some(url.to_string()); }
+
+    // Try first connection immediately.
+    try_ws_connect(url);
+
+    // If the first connection failed, log once (not on every retry).
+    if let Ok(handle) = WS_HANDLE.lock() {
+        if handle.is_none() {
+            info!("wasm_bridge: WS not connected (MCP server not running) — will auto-reconnect");
+        }
+    }
+
+    // Reconnect timer — checks every 3s, only connects if handle is None.
+    let reconnect = Closure::wrap(Box::new(move || {
+        let url = WS_URL.lock().ok().and_then(|u| u.clone());
+        if let Some(url) = url {
+            try_ws_connect(&url);
+        }
+    }) as Box<dyn FnMut()>);
+    let Ok(window) = js_sys::global().dyn_into::<web_sys::Window>() else { return };
+    window.set_interval_with_callback_and_timeout_and_arguments_0(
+        reconnect.as_ref().unchecked_ref(), 3_000,
+    ).ok();
+    reconnect.forget();
 }
 
 fn handle_ws_message(msg: Value) {
@@ -485,6 +546,10 @@ fn handle_ws_message(msg: Value) {
             let end_y = msg.get("end_y").and_then(|v| v.as_f64()).unwrap_or(y);
             let duration_ms = msg.get("duration_ms").and_then(|v| v.as_f64()).unwrap_or(300.0);
             push_cmd(BridgeCommand::SimulateTouch { x, y, end_x, end_y, duration_ms, seq });
+        }
+        "schema" => {
+            let name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("*").to_string();
+            push_cmd(BridgeCommand::Schema { name, seq });
         }
         other => warn!("wasm_bridge: unknown WS cmd '{other}'"),
     }
@@ -754,6 +819,21 @@ fn apply_bridge_commands(world: &mut World) {
                     "duration_ms": duration_ms,
                 });
                 if !dispatched { reply["error"] = "TouchEvent not supported or canvas missing".into(); }
+                if let Some(s) = seq { reply["_seq"] = s.into(); }
+                ws_send(&reply.to_string());
+            }
+            BridgeCommand::Schema { name, seq } => {
+                // Ensure cache is populated (no-op after first call).
+                populate_schema_cache(&registry.read());
+                let json_str = schema_get(&name);
+                let value: Value = serde_json::from_str(&json_str).unwrap_or(Value::Null);
+                let mut reply = serde_json::json!({
+                    "ok": !value.is_null(),
+                    "cmd": "schema",
+                    "name": name,
+                    "value": value,
+                });
+                if value.is_null() { reply["error"] = format!("type '{name}' not found").into(); }
                 if let Some(s) = seq { reply["_seq"] = s.into(); }
                 ws_send(&reply.to_string());
             }
@@ -1157,6 +1237,140 @@ fn apply_patch_to_struct(target: &mut dyn Reflect, patch: &Value, registry: &Typ
     }
 }
 
+// ---------------------------------------------------------------------------
+// Schema introspection — walks Bevy TypeInfo to expose field names & types
+// ---------------------------------------------------------------------------
+
+/// Build a JSON schema for a single registered type using its `TypeInfo`.
+fn build_type_schema(info: &bevy::reflect::TypeInfo) -> Value {
+    use bevy::reflect::{TypeInfo, VariantInfo};
+
+    let name = info.type_path_table().short_path();
+
+    match info {
+        TypeInfo::Struct(si) => {
+            let fields: Vec<Value> = (0..si.field_len())
+                .filter_map(|i| {
+                    let field = si.field_at(i)?;
+                    let type_short = field
+                        .type_path_table()
+                        .short_path()
+                        .to_string();
+                    Some(serde_json::json!({
+                        "name": field.name(),
+                        "type": type_short,
+                    }))
+                })
+                .collect();
+            serde_json::json!({
+                "name": name,
+                "kind": "struct",
+                "fields": fields,
+            })
+        }
+        TypeInfo::Enum(ei) => {
+            let variants: Vec<Value> = (0..ei.variant_len())
+                .filter_map(|i| {
+                    let variant = ei.variant_at(i)?;
+                    let mut v = serde_json::json!({ "name": variant.name() });
+                    if let VariantInfo::Struct(sv) = variant {
+                        let fields: Vec<Value> = (0..sv.field_len())
+                            .filter_map(|j| {
+                                let f = sv.field_at(j)?;
+                                Some(serde_json::json!({
+                                    "name": f.name(),
+                                    "type": f.type_path_table().short_path(),
+                                }))
+                            })
+                            .collect();
+                        if !fields.is_empty() {
+                            v["fields"] = Value::Array(fields);
+                        }
+                    }
+                    Some(v)
+                })
+                .collect();
+            serde_json::json!({
+                "name": name,
+                "kind": "enum",
+                "variants": variants,
+            })
+        }
+        _ => serde_json::json!({
+            "name": name,
+            "kind": "opaque",
+        }),
+    }
+}
+
+/// Populate SCHEMA_CACHE from the Bevy type registry (once).
+fn populate_schema_cache(registry: &TypeRegistry) {
+    {
+        let Ok(cache) = SCHEMA_CACHE.lock() else { return };
+        if !cache.is_empty() {
+            return; // already populated
+        }
+    }
+
+    let mut entries: Vec<(String, String)> = Vec::new();
+
+    for type_reg in registry.iter() {
+        // Only include types that are resources or components
+        let is_resource = type_reg.data::<bevy::ecs::reflect::ReflectResource>().is_some();
+        let is_component = type_reg.data::<bevy::ecs::reflect::ReflectComponent>().is_some();
+        if !is_resource && !is_component {
+            continue;
+        }
+        let info = type_reg.type_info();
+        let name = info.type_path_table().short_path().to_string();
+        let schema = build_type_schema(info);
+        if let Ok(json) = serde_json::to_string(&schema) {
+            entries.push((name, json));
+        }
+    }
+
+    // Also add StandardMaterial schema (for "Material:*" queries)
+    if let Some(mat_reg) = registry
+        .iter()
+        .find(|r| r.type_info().type_path_table().short_path() == "StandardMaterial")
+    {
+        let schema = build_type_schema(mat_reg.type_info());
+        if let Ok(json) = serde_json::to_string(&schema) {
+            entries.push(("StandardMaterial".to_string(), json));
+        }
+    }
+
+    if let Ok(mut cache) = SCHEMA_CACHE.lock() {
+        *cache = entries;
+    }
+}
+
+/// Read a schema from the cache. Name "*" returns all schemas as a JSON array.
+fn schema_get(name: &str) -> String {
+    let Ok(cache) = SCHEMA_CACHE.lock() else {
+        return "null".to_string();
+    };
+    if name == "*" || name.is_empty() {
+        let all: Vec<Value> = cache
+            .iter()
+            .filter_map(|(_, json)| serde_json::from_str(json).ok())
+            .collect();
+        serde_json::to_string(&all).unwrap_or_else(|_| "[]".to_string())
+    } else {
+        // "Material:X" → return StandardMaterial schema
+        let lookup = if name.starts_with("Material:") {
+            "StandardMaterial"
+        } else {
+            name
+        };
+        cache
+            .iter()
+            .find(|(k, _)| k == lookup)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| "null".to_string())
+    }
+}
+
 /// Merges `patch` into the inner value of the type-path-wrapped `target`.
 /// `target` = `{"full::type::Path": inner}`, `patch` = fields relative to `inner`.
 pub(crate) fn merge_into_inner(target: &mut Value, patch: &Value) {
@@ -1198,6 +1412,9 @@ pub(crate) fn merge_obj(target: &mut Value, patch: &serde_json::Map<String, Valu
 fn sync_resource_cache(world: &mut World) {
     let registry = world.get_resource::<AppTypeRegistry>().map(|r| r.clone());
     let Some(registry) = registry else { return };
+
+    // Populate type schemas once (idempotent — skips if already filled).
+    populate_schema_cache(&registry.read());
 
     let mut new_cache: Vec<(String, String)> = Vec::new();
 
@@ -1385,16 +1602,35 @@ impl Plugin for WasmBridgePlugin {
     }
 }
 
-/// Derive the default WS URL from the current page's hostname.
-/// Keeps localhost for file:// or null-origin pages; otherwise uses the
-/// same hostname the page was served from so phones on LAN auto-connect.
+/// Derive the default WS URL from the current page's location.
+///
+/// All modes use the `/ws` path — clean separation from the UI root.
+///
+///   HTTPS (Cloudflare prod)   → wss://<host>/ws
+///   HTTP port 3000 (trunk)    → ws://<host>:9001/ws  (separate MCP server)
+///   HTTP port 9001 (binary)   → ws://<host>:9001/ws  (same origin)
+///   HTTP port 8787 (wrangler) → ws://<host>:8787/ws  (same origin)
 fn default_ws_url() -> String {
     let Ok(window) = js_sys::global().dyn_into::<web_sys::Window>() else {
-        return "ws://localhost:9001".to_string();
+        return "ws://localhost:9001/ws".to_string();
     };
-    let hostname = window.location().hostname().unwrap_or_default();
+    let location = window.location();
+    let protocol = location.protocol().unwrap_or_default();
+    let hostname = location.hostname().unwrap_or_default();
+    let port = location.port().unwrap_or_default();
+
     let host = if hostname.is_empty() { "localhost".to_string() } else { hostname };
-    format!("ws://{host}:9001")
+
+    match protocol.as_str() {
+        // Cloudflare Workers (production) — WSS on same host.
+        "https:" => format!("wss://{host}/ws"),
+        _ => {
+            // Port 3000 = trunk serve (dev) → MCP server on port 9001.
+            // Everything else = same origin (binary on 9001, wrangler on 8787).
+            let ws_port = if port == "3000" || port.is_empty() { "9001" } else { &port };
+            format!("ws://{host}:{ws_port}/ws")
+        }
+    }
 }
 
 /// Parse URL query parameters into a key-value map.

@@ -7,13 +7,20 @@ edition = "2021"
 name = "pmetra-mcp-server"
 path = "src/main.rs"
 
+[features]
+default = []
+# Embed the WASM app (dist/) in the binary for single-file distribution.
+# Build: cargo build -p pmetra-mcp-server --release --features embed-ui
+# Requires: trunk build --release --no-default-features (creates dist/)
+embed-ui = ["dep:rust-embed"]
+
 [dependencies]
 # MCP protocol
 rmcp = { version = "1.4.0", features = ["server", "transport-io", "macros", "schemars"] }
 schemars = "1.0"
 
-# WebSocket client — talks to the WASM bridge on ws://localhost:9001
-tokio-tungstenite = { version = "0.26", features = ["connect"] }
+# HTTP + WebSocket server (same port)
+axum = { version = "0.8", features = ["ws"] }
 futures-util = "0.3"
 
 # Async runtime
@@ -27,3 +34,6 @@ anyhow = "1"
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Embedded static files (optional — only with embed-ui feature)
+rust-embed = { version = "8", optional = true }

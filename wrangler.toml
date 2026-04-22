@@ -1,7 +1,16 @@
 name = "pmetra-demo"
-main = "workers/static-site.js"
+main = "workers/worker.js"
 compatibility_date = "2025-01-01"
 
 [[r2_buckets]]
 binding = "ASSETS"
 bucket_name = "pmetra-assets"
+
+# Durable Object — WebSocket broker between /call API and WASM app.
+[[durable_objects.bindings]]
+name = "BROKER"
+class_name = "PmetraBroker"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["PmetraBroker"]

@@ -3,8 +3,8 @@ node = "lts"
 rust = "1.93.1"
 just = "latest"
 trunk = "latest"
-bun = "latest"
 wrangler = "latest"
+jq = "latest"
 
 [env]
 # Needed for WebGPU APIs in WASM builds.
