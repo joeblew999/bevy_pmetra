@@ -26,14 +26,16 @@ where
 {
     use bevy::platform::collections::HashMap;
 
-    let vmap: FxHashMap<_, _> = shell
+    // Rayon parallel iterators collect into std HashMap; we convert to Bevy HashMap at the end.
+    let vmap: std::collections::HashMap<_, _> = shell
         .vertex_par_iter()
         .map(|v| (v.id(), v.mapped(Point3::clone)))
         .collect();
-    let eset: FxHashMap<_, _> = shell.edge_par_iter().map(move |e| (e.id(), e)).collect();
-    let edge_map: FxHashMap<_, _> = eset
+    let eset: std::collections::HashMap<_, _> =
+        shell.edge_par_iter().map(move |e| (e.id(), e)).collect();
+    let edge_map: std::collections::HashMap<_, _> = eset
         .into_par_iter()
-        .map(move |(id, edge)| {
+        .map(move |(id, edge): (_, _)| {
             let v0 = vmap.get(&edge.absolute_front().id()).unwrap();
             let v1 = vmap.get(&edge.absolute_back().id()).unwrap();
             let curve = edge.curve();
@@ -60,10 +62,10 @@ where
             shell_create_polygon(&face.surface(), wires, face.orientation(), tol, &sp);
         (face.id(), meshed_face)
     };
-    let meshed_faces_by_brep_face = shell
+    let meshed_faces_by_brep_face: HashMap<_, _> = shell
         .face_iter()
         .map(create_face)
-        .collect::<HashMap<_, _>>();
+        .collect();
 
     let meshed_shell = meshed_faces_by_brep_face
         .iter()

@@ -1,7 +1,9 @@
 use std::marker::PhantomData;
 
 use bevy::{
+    color::palettes::css,
     ecs::component::Mutable,
+    pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
 };
 

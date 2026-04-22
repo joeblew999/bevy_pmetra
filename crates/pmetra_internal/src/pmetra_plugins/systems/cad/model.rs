@@ -452,6 +452,7 @@ pub fn mesh_builder_to_bundle<Params: PmetraModelling + Component + Clone>(
         (
             Entity,
             Option<&CadGeneratedMesh>,
+            Option<&MeshMaterial3d<StandardMaterial>>,
             &CadShellName,
             &CadMeshName,
             &CadMeshBuilder<Params>,
@@ -463,6 +464,7 @@ pub fn mesh_builder_to_bundle<Params: PmetraModelling + Component + Clone>(
     for (
         entity,
         cad_generated_mesh,
+        existing_material,
         _shell_name,
         mesh_name,
         mesh_builder,
@@ -492,13 +494,15 @@ pub fn mesh_builder_to_bundle<Params: PmetraModelling + Component + Clone>(
             transform,
             outlines,
         } = cad_mesh;
-        let material_hdl = materials.add(base_material);
 
         if cad_generated_mesh.is_some() {
-            // If mesh already exists, update it...
+            // Mesh already exists — update geometry but keep the existing material
+            // handle so that runtime patches (e.g. via wasm_bridge) survive rebuilds.
+            if existing_material.is_none() {
+                ent_commands.insert(MeshMaterial3d(materials.add(base_material)));
+            }
             ent_commands
                 .insert((
-                    MeshMaterial3d(material_hdl.clone()),
                     Mesh3d(mesh_hdl),
                     transform,
                     CadGeneratedMeshOutlines(outlines.clone()),
@@ -507,7 +511,8 @@ pub fn mesh_builder_to_bundle<Params: PmetraModelling + Component + Clone>(
                 // ref: https://github.com/bevyengine/bevy/issues/4294#issuecomment-1606056536)
                 .remove::<Aabb>();
         } else {
-            // Insert a new mesh comp if does not exist...
+            // Insert a new mesh with a fresh material...
+            let material_hdl = materials.add(base_material);
             ent_commands
                 .insert((
                     MeshMaterial3d(material_hdl.clone()),
