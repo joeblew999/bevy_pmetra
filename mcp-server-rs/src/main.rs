@@ -107,10 +107,11 @@ impl Broker {
 // ─── WebSocket broker task ─────────────────────────────────────────────────────
 
 async fn run_ws_broker(broker: Broker, port: u16) {
-    let addr = format!("127.0.0.1:{port}");
+    // Bind on all interfaces so phones on the same WiFi can reach ws://<mac-ip>:<port>.
+    let addr = format!("0.0.0.0:{port}");
     let listener = TcpListener::bind(&addr).await
         .unwrap_or_else(|e| panic!("WS broker: cannot bind {addr}: {e}"));
-    info!("WebSocket broker listening on ws://{addr}");
+    info!("WebSocket broker listening on ws://{addr} (reachable over LAN)");
 
     // Accept connections in a loop — WASM reconnects if page reloads.
     loop {
@@ -201,6 +202,20 @@ struct LoadStepParams {
     data: String,
     /// Optional position: {"translation": [x, y, z]}.
     transform: Option<Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct SimulateTouchParams {
+    /// X coord of touchstart in canvas-local pixels (from canvas top-left).
+    x: f64,
+    /// Y coord of touchstart in canvas-local pixels.
+    y: f64,
+    /// X coord of touchend. Omit for a tap (same as start).
+    end_x: Option<f64>,
+    /// Y coord of touchend. Omit for a tap.
+    end_y: Option<f64>,
+    /// Total drag duration in milliseconds. Default 300.
+    duration_ms: Option<f64>,
 }
 
 // ─── MCP server ────────────────────────────────────────────────────────────────
@@ -348,6 +363,33 @@ impl PmetraServer {
             "cmd": "delete_shape",
             "name": params.0.name,
         })).await {
+            Ok(resp) => resp.to_string(),
+            Err(e) => format!(r#"{{"ok":false,"error":"{e}"}}"#),
+        }
+    }
+
+    /// Dispatch a synthetic touch on the canvas. Coords are pixels from the
+    /// canvas top-left. Omit end_x/end_y for a tap; provide them for a drag.
+    /// Blocks until the dispatch finishes (duration_ms + 50ms) so a following
+    /// screenshot sees the post-drag state.
+    #[tool(name = "simulate_touch")]
+    async fn simulate_touch(&self, params: Parameters<SimulateTouchParams>) -> String {
+        let dur = params.0.duration_ms.unwrap_or(300.0);
+        let end_x = params.0.end_x.unwrap_or(params.0.x);
+        let end_y = params.0.end_y.unwrap_or(params.0.y);
+        let result = self.broker.call(serde_json::json!({
+            "cmd": "simulate_touch",
+            "x": params.0.x,
+            "y": params.0.y,
+            "end_x": end_x,
+            "end_y": end_y,
+            "duration_ms": dur,
+        })).await;
+        // Wait for the JS-side dispatch loop to finish so screenshots see
+        // the final state rather than a mid-drag frame.
+        let wait_ms = (dur as u64).saturating_add(50);
+        tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+        match result {
             Ok(resp) => resp.to_string(),
             Err(e) => format!(r#"{{"ok":false,"error":"{e}"}}"#),
         }

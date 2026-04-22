@@ -55,6 +55,31 @@ build-pmetra-demo-web:
 trunk-serve-web:
   trunk serve --release --no-default-features
 
+# FAST local dev loop. Skips wasm-opt + fat LTO + size optimization —
+# builds in ~20s instead of ~3 min. Use for iterating on Rust/CSS/HTML
+# changes. NEVER use this output for shipping — bundle is huge and slow.
+dev-web:
+  #!/usr/bin/env -S mise x -- bash
+  export CARGO_PROFILE_RELEASE_LTO=off
+  export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+  export CARGO_PROFILE_RELEASE_OPT_LEVEL=1
+  export CARGO_PROFILE_RELEASE_STRIP=none
+  trunk serve --release --no-default-features
+
+# Same fast profile but binds 0.0.0.0 so your phone can hit http://<LAN-IP>:3000
+# to test mobile touch / handle interactions without re-uploading to CF.
+dev-web-lan:
+  #!/usr/bin/env -S mise x -- bash
+  export CARGO_PROFILE_RELEASE_LTO=off
+  export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+  export CARGO_PROFILE_RELEASE_OPT_LEVEL=1
+  export CARGO_PROFILE_RELEASE_STRIP=none
+  IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "localhost")
+  echo ""
+  echo "  Phone URL: http://${IP}:3000"
+  echo ""
+  trunk serve --release --no-default-features --address 0.0.0.0 --port 3000
+
 # Serve WASM app on LAN (accessible from phone/tablet on same WiFi).
 # Add ?model=<variant> to URL to select initial model.
 serve-lan:

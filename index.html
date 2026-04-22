@@ -91,6 +91,61 @@
       <canvas id="bevy">Javascript and support for canvas is required</canvas>
     </main>
     <script>
+      // Synthetic touch dispatch — used by the MCP simulate_touch tool so
+      // automation can exercise the mobile drag-handle flow without human
+      // hands on a real phone. Fires touchstart → N touchmoves over
+      // `durationMs` → touchend. All coords are canvas-local (pixels from
+      // canvas top-left). Fire-and-forget; caller sleeps durationMs.
+      window._pmetraSimulateTouch = function (x1, y1, x2, y2, durationMs) {
+        const canvas = document.querySelector("canvas");
+        if (!canvas) return false;
+        if (typeof Touch !== "function" || typeof TouchEvent !== "function") {
+          console.warn("_pmetraSimulateTouch: Touch/TouchEvent not supported");
+          return false;
+        }
+        const rect = canvas.getBoundingClientRect();
+        const mk = (px, py) =>
+          new Touch({
+            identifier: 1,
+            target: canvas,
+            clientX: rect.left + px,
+            clientY: rect.top + py,
+            pageX: rect.left + px,
+            pageY: rect.top + py,
+            radiusX: 5,
+            radiusY: 5,
+            force: 1,
+          });
+        const dispatch = (type, t) =>
+          canvas.dispatchEvent(
+            new TouchEvent(type, {
+              cancelable: true,
+              bubbles: true,
+              touches: type === "touchend" ? [] : [t],
+              targetTouches: type === "touchend" ? [] : [t],
+              changedTouches: [t],
+            })
+          );
+        const dur = Math.max(16, durationMs | 0);
+        const steps = Math.max(2, Math.floor(dur / 16));
+        dispatch("touchstart", mk(x1, y1));
+        let i = 0;
+        const iv = setInterval(() => {
+          i++;
+          const t = Math.min(1, i / steps);
+          const x = x1 + (x2 - x1) * t;
+          const y = y1 + (y2 - y1) * t;
+          if (i >= steps) {
+            clearInterval(iv);
+            dispatch("touchend", mk(x, y));
+          } else {
+            dispatch("touchmove", mk(x, y));
+          }
+        }, dur / steps);
+        return true;
+      };
+    </script>
+    <script>
       (function () {
         const buttons = document.querySelectorAll(".demo-btn");
         const activeClasses = ["bg-indigo-600", "hover:bg-indigo-500"];

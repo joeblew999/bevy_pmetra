@@ -86,6 +86,10 @@ enum BridgeCommand {
     /// Delete a loaded shape — despawns entity and removes from localStorage.
     /// {"cmd":"delete_shape","name":"cube"}
     DeleteShape { name: String, seq: Option<u64> },
+    /// Dispatch a synthetic touch-drag on the canvas at the given coords (pixels
+    /// from canvas top-left). If `end_x`/`end_y` equal start, behaves as a tap.
+    /// {"cmd":"simulate_touch","x":100,"y":200,"end_x":150,"end_y":200,"duration_ms":300}
+    SimulateTouch { x: f64, y: f64, end_x: f64, end_y: f64, duration_ms: f64, seq: Option<u64> },
 }
 
 static COMMAND_QUEUE: Mutex<Vec<BridgeCommand>> = Mutex::new(Vec::new());
@@ -474,6 +478,14 @@ fn handle_ws_message(msg: Value) {
             let name = msg.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
             push_cmd(BridgeCommand::DeleteShape { name, seq });
         }
+        "simulate_touch" => {
+            let x = msg.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let y = msg.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let end_x = msg.get("end_x").and_then(|v| v.as_f64()).unwrap_or(x);
+            let end_y = msg.get("end_y").and_then(|v| v.as_f64()).unwrap_or(y);
+            let duration_ms = msg.get("duration_ms").and_then(|v| v.as_f64()).unwrap_or(300.0);
+            push_cmd(BridgeCommand::SimulateTouch { x, y, end_x, end_y, duration_ms, seq });
+        }
         other => warn!("wasm_bridge: unknown WS cmd '{other}'"),
     }
 }
@@ -733,6 +745,43 @@ fn apply_bridge_commands(world: &mut World) {
                 if let Some(s) = seq { reply["_seq"] = s.into(); }
                 ws_send(&reply.to_string());
             }
+            BridgeCommand::SimulateTouch { x, y, end_x, end_y, duration_ms, seq } => {
+                let dispatched = dispatch_simulated_touch(x, y, end_x, end_y, duration_ms);
+                let mut reply = serde_json::json!({
+                    "ok": dispatched,
+                    "cmd": "simulate_touch",
+                    "x": x, "y": y, "end_x": end_x, "end_y": end_y,
+                    "duration_ms": duration_ms,
+                });
+                if !dispatched { reply["error"] = "TouchEvent not supported or canvas missing".into(); }
+                if let Some(s) = seq { reply["_seq"] = s.into(); }
+                ws_send(&reply.to_string());
+            }
+        }
+    }
+}
+
+/// Invoke the `window._pmetraSimulateTouch` JS helper defined in index.html.
+/// Fires touchstart → touchmoves → touchend on the canvas.
+/// Returns false if the helper is missing or the browser lacks TouchEvent support.
+fn dispatch_simulated_touch(x: f64, y: f64, end_x: f64, end_y: f64, duration_ms: f64) -> bool {
+    let Ok(window) = js_sys::global().dyn_into::<web_sys::Window>() else { return false };
+    let Ok(helper) = js_sys::Reflect::get(&window, &"_pmetraSimulateTouch".into()) else {
+        return false;
+    };
+    let Ok(func) = helper.dyn_into::<js_sys::Function>() else { return false };
+    let args = js_sys::Array::of5(
+        &JsValue::from_f64(x),
+        &JsValue::from_f64(y),
+        &JsValue::from_f64(end_x),
+        &JsValue::from_f64(end_y),
+        &JsValue::from_f64(duration_ms),
+    );
+    match func.apply(&JsValue::NULL, &args) {
+        Ok(ret) => ret.as_bool().unwrap_or(true),
+        Err(e) => {
+            warn!("wasm_bridge: simulate_touch call failed: {e:?}");
+            false
         }
     }
 }
@@ -1313,9 +1362,10 @@ impl Plugin for WasmBridgePlugin {
     fn build(&self, app: &mut App) {
         mount_js_namespace();
         let params = read_url_params();
-        // WebSocket: ?ws=wss://your-worker.dev or default to localhost.
-        let ws_url = params.get("ws").cloned()
-            .unwrap_or_else(|| "ws://localhost:9001".to_string());
+        // WebSocket URL: ?ws=wss://your-worker.dev overrides everything.
+        // Otherwise derive from the page's hostname — so a phone loading
+        // http://<mac-ip>:3000 automatically connects to ws://<mac-ip>:9001.
+        let ws_url = params.get("ws").cloned().unwrap_or_else(default_ws_url);
         connect_websocket(&ws_url);
         // Restore shapes saved in localStorage from previous sessions.
         restore_persisted_shapes();
@@ -1333,6 +1383,18 @@ impl Plugin for WasmBridgePlugin {
         app.add_systems(PreUpdate, apply_bridge_commands)
             .add_systems(PostUpdate, sync_resource_cache);
     }
+}
+
+/// Derive the default WS URL from the current page's hostname.
+/// Keeps localhost for file:// or null-origin pages; otherwise uses the
+/// same hostname the page was served from so phones on LAN auto-connect.
+fn default_ws_url() -> String {
+    let Ok(window) = js_sys::global().dyn_into::<web_sys::Window>() else {
+        return "ws://localhost:9001".to_string();
+    };
+    let hostname = window.location().hostname().unwrap_or_default();
+    let host = if hostname.is_empty() { "localhost".to_string() } else { hostname };
+    format!("ws://{host}:9001")
 }
 
 /// Parse URL query parameters into a key-value map.
