@@ -90,6 +90,16 @@ CF Worker + Durable Object (`PmetraBroker`) with WebSocket Hibernation API.
 Serves static files from R2, relays MCP commands via DO. Same `/health`, `/call`, `/ws`
 API as the local Rust server — tests work on both (`just cf-test`).
 
+**Agent readiness** (Level 5 — Agent-Native): robots.txt with Content Signals, sitemap.xml,
+MCP Server Card (SEP-1649), API Catalog (RFC 9727), A2A Agent Card, Agent Skills Discovery
+(agentskills.io v0.2.0), SKILL.md, markdown content negotiation, Link headers. All metadata
+derived from `pmetra-manifest.json` (single source of truth).
+
+**WebMCP** (W3C Draft, Chrome 145+): The Worker injects a `<script>` into index.html at
+serve time that registers all 12 MCP tools via `navigator.modelContext.registerTool()`.
+Feature-gated — only activates when the browser exposes the API. Tool registrations map
+to `POST /call` on the same origin, using the same cmd protocol as the WS bridge.
+
 ---
 
 ## Start sequence
@@ -117,7 +127,8 @@ just cf-test 443 pmetra-demo.gedw99.workers.dev https
 | `pmetra_demo/src/wasm_bridge.rs` | The bridge — JS API, WS client, command queue, localStorage persistence |
 | `pmetra_demo/src/truck_loader.rs` | Truck JSON/STEP loader, tessellation, B-rep round-trip |
 | `mcp-server-rs/src/main.rs` | Rust MCP server — WS broker, HTTP API, MCP stdio, optional embedded UI |
-| `workers/worker.js` | Cloudflare Worker + Durable Object (WS relay, R2 static files) |
+| `workers/worker.js` | Cloudflare Worker + Durable Object (WS relay, R2 static files, agent readiness, WebMCP injection) |
+| `pmetra-manifest.json` | SSOT for agent metadata — tools, models, skills (imported by Worker, drives all agent routes) |
 | `wrangler.toml` | CF Worker config (R2 bucket, DO migration) |
 | `IDEAS.md` | Ecosystem analysis — dimforge, Truck, inferi integration plans |
 | `JUSTFILE` | All task commands |

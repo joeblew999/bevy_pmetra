@@ -14,6 +14,8 @@
  * Durable Object uses WebSocket Hibernation — zero cost when idle, wakes on message.
  */
 
+import manifest from "../pmetra-manifest.json";
+
 const MIME_TYPES = {
   ".html": "text/html",
   ".js": "application/javascript",
@@ -25,6 +27,264 @@ const MIME_TYPES = {
   ".svg": "image/svg+xml",
   ".txt": "text/plain",
 };
+
+// ── Agent readiness — all metadata derived from pmetra-manifest.json ───────
+
+const LINK_HEADER =
+  '</.well-known/api-catalog>; rel="api-catalog", </.well-known/mcp/server-card.json>; rel="service-desc"';
+
+// SKILL.md content (origin-independent so digest is stable).
+const SKILL_MD = [
+  `# ${manifest.skills[0].name}`,
+  "",
+  manifest.skills[0].description,
+  "",
+  "## When to Use It",
+  "",
+  "Use this skill to control parametric 3D CAD geometry running in a browser",
+  "via WebAssembly. Send commands through the HTTP API (`POST /call`) and",
+  "observe results via screenshots.",
+  "",
+  "## How to Call It",
+  "",
+  "Send a JSON command to `POST /call`:",
+  "",
+  "```json",
+  '{"cmd": "list"}',
+  '{"cmd": "get", "resource": "TowerExtension"}',
+  '{"cmd": "set", "resource": "TowerExtension", "value": {"tower_length": 5.0}}',
+  '{"cmd": "screenshot"}',
+  '{"cmd": "schema", "name": "TowerExtension"}',
+  "```",
+  "",
+  "## Available Models",
+  "",
+  ...manifest.models.map((m) => `- ${m}`),
+  "",
+  "## MCP Tools",
+  "",
+  ...manifest.tools.map((t) => `- **${t.name}** — ${t.description}`),
+  "",
+].join("\n");
+
+// ── WebMCP script — injected into index.html before </head> ─────────────────
+// Registers all MCP tools via navigator.modelContext (W3C Draft, Chrome 145+).
+// Maps MCP tool names to bridge commands that POST to /call on the same origin.
+// Feature-gated: only runs when the browser exposes navigator.modelContext.
+
+const WEBMCP_TOOL_MAP = JSON.stringify(
+  manifest.tools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    inputSchema: t.inputSchema || { type: "object", properties: {} },
+  })),
+);
+
+// The cmd mapping from MCP tool names → bridge {cmd, ...} payloads.
+const WEBMCP_SCRIPT = `<script>
+(function() {
+  if (!navigator.modelContext) return;
+  var ac = new AbortController();
+  var toolMap = {
+    list_resources: function()    { return {cmd:"list"}; },
+    get_resource:   function(i)   { return {cmd:"get", resource:i.name}; },
+    set_resource:   function(i)   { return {cmd:"set", resource:i.name, value:i.value}; },
+    screenshot:     function()    { return {cmd:"screenshot"}; },
+    get_schema:     function(i)   { return {cmd:"schema", name:i.name}; },
+    load_shape:     function(i)   { return {cmd:"load_shape", name:i.name, data:i.data}; },
+    save_shape:     function(i)   { return {cmd:"save_shape", name:i.name}; },
+    list_shapes:    function()    { return {cmd:"list_shapes"}; },
+    load_step:      function(i)   { return {cmd:"load_step", name:i.name, data:i.data}; },
+    save_step:      function(i)   { return {cmd:"save_step", name:i.name}; },
+    delete_shape:   function(i)   { return {cmd:"delete_shape", name:i.name}; },
+    simulate_touch: function(i)   { return Object.assign({cmd:"simulate_touch"}, i); }
+  };
+  var tools = ${WEBMCP_TOOL_MAP};
+  tools.forEach(function(t) {
+    var mapFn = toolMap[t.name] || function(i) { return {cmd:t.name}; };
+    navigator.modelContext.registerTool({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema,
+      execute: function(input) {
+        return fetch("/call", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(mapFn(input || {}))
+        }).then(function(r) { return r.json(); });
+      }
+    }, {signal: ac.signal});
+  });
+  window.addEventListener("pagehide", function() { ac.abort(); }, {once:true});
+  console.log("[WebMCP] registered " + tools.length + " tools");
+})();
+</script>`;
+
+// Lazy SHA-256 digest of SKILL_MD (computed once, cached).
+let _skillDigest = null;
+async function skillDigest() {
+  if (!_skillDigest) {
+    const buf = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(SKILL_MD),
+    );
+    _skillDigest =
+      "sha256:" +
+      [...new Uint8Array(buf)]
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+  }
+  return _skillDigest;
+}
+
+/**
+ * Handle agent-readiness routes inline (not from R2).
+ * Returns a Response or null (fall through to R2/DO).
+ * All data derived from pmetra-manifest.json — single source of truth.
+ */
+async function agentRoutes(url) {
+  const origin = url.origin;
+
+  // ── robots.txt with Content Signals ──
+  if (url.pathname === "/robots.txt") {
+    return new Response(
+      [
+        "User-agent: *",
+        "Allow: /",
+        "Content-Signal: ai-train=no, search=yes, ai-input=yes",
+        "",
+        `Sitemap: ${origin}/sitemap.xml`,
+        "",
+      ].join("\n"),
+      { headers: { "content-type": "text/plain; charset=utf-8" } },
+    );
+  }
+
+  // ── sitemap.xml — all model variant URLs ──
+  if (url.pathname === "/sitemap.xml") {
+    const entries = [
+      `  <url><loc>${origin}/</loc></url>`,
+      ...manifest.models.map(
+        (m) => `  <url><loc>${origin}/?model=${m}</loc></url>`,
+      ),
+    ].join("\n");
+    return new Response(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+        entries,
+        "</urlset>",
+        "",
+      ].join("\n"),
+      { headers: { "content-type": "application/xml; charset=utf-8" } },
+    );
+  }
+
+  // ── MCP Server Card (SEP-1649) ──
+  if (
+    url.pathname === "/.well-known/mcp/server-card.json" ||
+    url.pathname === "/.well-known/mcp/server-cards.json" ||
+    url.pathname === "/.well-known/mcp.json"
+  ) {
+    const card = {
+      serverInfo: { name: manifest.name, version: manifest.version },
+      description: manifest.description,
+      url: `${origin}/call`,
+      transport: { type: "streamable-http" },
+      capabilities: { tools: true, resources: true },
+    };
+    const body =
+      url.pathname === "/.well-known/mcp/server-cards.json" ? [card] : card;
+    return Response.json(body);
+  }
+
+  // ── API Catalog (RFC 9727) ──
+  if (url.pathname === "/.well-known/api-catalog") {
+    return new Response(
+      JSON.stringify({
+        linkset: [
+          {
+            anchor: `${origin}/`,
+            "service-desc": [
+              {
+                href: "/.well-known/mcp/server-card.json",
+                type: "application/json",
+              },
+            ],
+          },
+        ],
+      }),
+      {
+        headers: {
+          "content-type": "application/linkset+json; charset=utf-8",
+        },
+      },
+    );
+  }
+
+  // ── A2A Agent Card (Google A2A protocol) ──
+  if (url.pathname === "/.well-known/agent-card.json") {
+    return Response.json({
+      name: manifest.name,
+      description: manifest.description,
+      version: manifest.version,
+      url: origin,
+      supportedInterfaces: [
+        {
+          url: `${origin}/call`,
+          protocolBinding: "HTTP+JSON",
+          protocolVersion: manifest.version,
+        },
+      ],
+      capabilities: { streaming: false, pushNotifications: false },
+      defaultInputModes: ["application/json"],
+      defaultOutputModes: ["application/json", "image/png"],
+      skills: manifest.skills.map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        tags: s.tags,
+        examples: [
+          "Set the tower height to 5.0",
+          "Switch to the NURBS surface model",
+          "Take a screenshot of the current viewport",
+        ],
+      })),
+    });
+  }
+
+  // ── Agent Skills Discovery (agentskills.io v0.2.0) ──
+  if (url.pathname === "/.well-known/agent-skills/index.json") {
+    const digest = await skillDigest();
+    return Response.json({
+      $schema:
+        "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+      skills: manifest.skills.map((s) => ({
+        name: s.id,
+        type: "skill-md",
+        description: s.description,
+        url: `/.well-known/agent-skills/${s.id}/SKILL.md`,
+        digest,
+      })),
+    });
+  }
+
+  // ── Individual SKILL.md ──
+  if (
+    url.pathname === "/.well-known/agent-skills/cad-control/SKILL.md"
+  ) {
+    return new Response(SKILL_MD, {
+      headers: { "content-type": "text/markdown; charset=utf-8" },
+    });
+  }
+
+  // ── .well-known catch-all — proper 404, not SPA fallback ──
+  if (url.pathname.startsWith("/.well-known/")) {
+    return new Response("Not Found", { status: 404 });
+  }
+
+  return null;
+}
 
 // ── Durable Object: single-slot WebSocket broker ────────────────────────────
 //
@@ -157,6 +417,46 @@ export default {
       return new Response(null, { headers: corsHeaders() });
     }
 
+    // Agent readiness routes (inline, not R2).
+    const agentResp = await agentRoutes(url);
+    if (agentResp) return agentResp;
+
+    // Markdown content negotiation — agents requesting text/markdown
+    // get a structured description instead of the WASM app HTML.
+    if (
+      url.pathname === "/" &&
+      request.headers.get("accept")?.includes("text/markdown")
+    ) {
+      const o = url.origin;
+      const md = [
+        `# ${manifest.name}`,
+        "",
+        manifest.description,
+        "",
+        "## Models",
+        "",
+        ...manifest.models.map((m) => `- [${m}](${o}/?model=${m})`),
+        "",
+        "## API",
+        "",
+        `- \`POST ${o}/call\` — send commands to the CAD engine`,
+        `- \`GET ${o}/health\` — server status`,
+        `- [MCP Server Card](${o}/.well-known/mcp/server-card.json)`,
+        `- [Agent Card](${o}/.well-known/agent-card.json)`,
+        "",
+        "## MCP Tools",
+        "",
+        ...manifest.tools.map((t) => `- **${t.name}** — ${t.description}`),
+        "",
+      ].join("\n");
+      return new Response(md, {
+        headers: {
+          "content-type": "text/markdown; charset=utf-8",
+          link: LINK_HEADER,
+        },
+      });
+    }
+
     // API + WebSocket → Durable Object (singleton "default" instance).
     const isWsUpgrade = request.headers.get("Upgrade") === "websocket";
     if (
@@ -192,13 +492,23 @@ async function serveStatic(url, env) {
     // SPA fallback — serve index.html for unknown paths.
     const fallback = await env.ASSETS.get("index.html");
     if (!fallback) return new Response("Not Found", { status: 404 });
-    return new Response(fallback.body, {
-      headers: { "content-type": "text/html", "cache-control": "no-cache" },
-    });
+    return new Response(
+      await injectWebMcp(fallback),
+      {
+        headers: {
+          "content-type": "text/html",
+          "cache-control": "no-cache",
+          link: LINK_HEADER,
+        },
+      },
+    );
   }
 
   const headers = new Headers();
   headers.set("content-type", contentType);
+  if (contentType === "text/html") {
+    headers.set("link", LINK_HEADER);
+  }
   // Cache hashed assets for a day, everything else for 60s.
   if (ext === ".wasm" || ext === ".js") {
     headers.set("cache-control", "public, max-age=86400");
@@ -207,7 +517,22 @@ async function serveStatic(url, env) {
     headers.set("cache-control", "public, max-age=60");
   }
 
+  // Inject WebMCP into HTML pages.
+  if (contentType === "text/html") {
+    return new Response(await injectWebMcp(object), { headers });
+  }
+
   return new Response(object.body, { headers });
+}
+
+/**
+ * Read an R2 object's body as text and inject the WebMCP <script> before </head>.
+ * If </head> is not found, returns the original HTML unchanged.
+ */
+async function injectWebMcp(r2Object) {
+  const html = await r2Object.text();
+  if (!html.includes("</head>")) return html;
+  return html.replace("</head>", WEBMCP_SCRIPT + "\n  </head>");
 }
 
 // ── CORS helpers ─────────────────────────────────────────────────────────────

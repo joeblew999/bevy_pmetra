@@ -1,0 +1,35 @@
+{
+  "name": "pmetra",
+  "version": "0.1.0",
+  "description": "AI-driven parametric CAD — control 3D geometry via MCP tools",
+  "models": [
+    "TowerExtension",
+    "ExpNurbsSolid",
+    "RoundCabinSegment",
+    "SimplCubeAtCylinder",
+    "MultiModelsSimplCubeAtCylinderAndTowerExtension",
+    "MultiModels2TowerExtensions"
+  ],
+  "tools": [
+    { "name": "list_resources", "description": "List all exposed resources, components, and materials" },
+    { "name": "get_resource", "description": "Get current value of a resource or component", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
+    { "name": "set_resource", "description": "Patch a resource or component — triggers geometry rebuild", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" }, "value": { "type": "object" } }, "required": ["name", "value"] } },
+    { "name": "screenshot", "description": "Capture PNG screenshot of the 3D viewport" },
+    { "name": "get_schema", "description": "Get field-level schema for a registered type", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } } } },
+    { "name": "load_shape", "description": "Load Truck JSON geometry into the scene", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" }, "data": { "type": "string" } }, "required": ["name", "data"] } },
+    { "name": "save_shape", "description": "Save a shape back to Truck JSON", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
+    { "name": "list_shapes", "description": "List all loaded shapes" },
+    { "name": "load_step", "description": "Load a STEP file into the scene", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" }, "data": { "type": "string" } }, "required": ["name", "data"] } },
+    { "name": "save_step", "description": "Export a shape as STEP", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
+    { "name": "delete_shape", "description": "Remove a shape from the scene", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
+    { "name": "simulate_touch", "description": "Dispatch synthetic touch on the 3D canvas", "inputSchema": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "end_x": { "type": "number" }, "end_y": { "type": "number" }, "duration_ms": { "type": "number" } }, "required": ["x", "y"] } }
+  ],
+  "skills": [
+    {
+      "id": "cad-control",
+      "name": "Parametric CAD Control",
+      "description": "Control parametric 3D CAD geometry — set parameters, load shapes, take screenshots",
+      "tags": ["3d", "cad", "parametric", "geometry", "mcp"]
+    }
+  ]
+}

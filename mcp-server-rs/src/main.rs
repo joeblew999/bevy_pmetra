@@ -100,6 +100,11 @@ async fn static_handler(uri: axum::http::Uri) -> Response {
         ).into_response();
     }
 
+    // No SPA fallback for .well-known paths — return proper 404.
+    if path.starts_with(".well-known/") {
+        return (StatusCode::NOT_FOUND, "Not Found").into_response();
+    }
+
     // SPA fallback — serve index.html for unknown paths.
     if let Some(content) = Asset::get("index.html") {
         return (
