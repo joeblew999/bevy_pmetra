@@ -33,37 +33,84 @@ const MIME_TYPES = {
 const LINK_HEADER =
   '</.well-known/api-catalog>; rel="api-catalog", </.well-known/mcp/server-card.json>; rel="service-desc"';
 
+// Helper: model name (works whether models are strings or objects).
+const modelName = (m) => (typeof m === "string" ? m : m.name);
+
 // SKILL.md content (origin-independent so digest is stable).
 const SKILL_MD = [
   `# ${manifest.skills[0].name}`,
   "",
   manifest.skills[0].description,
   "",
-  "## When to Use It",
+  "## Workflow",
   "",
-  "Use this skill to control parametric 3D CAD geometry running in a browser",
-  "via WebAssembly. Send commands through the HTTP API (`POST /call`) and",
-  "observe results via screenshots.",
+  "1. **Discover** — `list_resources` to see everything you can control",
+  "2. **Inspect** — `get_schema` to learn field names and types",
+  "3. **Read** — `get_resource` to see current values",
+  "4. **Modify** — `set_resource` to change parameters (triggers geometry rebuild)",
+  "5. **Verify** — `screenshot` to see the result",
   "",
-  "## How to Call It",
-  "",
-  "Send a JSON command to `POST /call`:",
+  "## Quick Start",
   "",
   "```json",
   '{"cmd": "list"}',
-  '{"cmd": "get", "resource": "TowerExtension"}',
-  '{"cmd": "set", "resource": "TowerExtension", "value": {"tower_length": 5.0}}',
-  '{"cmd": "screenshot"}',
   '{"cmd": "schema", "name": "TowerExtension"}',
+  '{"cmd": "get", "resource": "TowerExtension"}',
+  '{"cmd": "set", "resource": "TowerExtension", "value": {"tower_length": 3.0}}',
+  '{"cmd": "screenshot"}',
   "```",
   "",
   "## Available Models",
   "",
-  ...manifest.models.map((m) => `- ${m}`),
-  "",
+  ...manifest.models.flatMap((m) => {
+    const lines = [`### ${modelName(m)}`];
+    if (m.description) lines.push("", m.description);
+    if (m.parameters && m.parameters.length > 0) {
+      lines.push("", "| Parameter | Type | Default | Description |");
+      lines.push("| --- | --- | --- | --- |");
+      m.parameters.forEach((p) => {
+        const def = p.default !== undefined ? String(p.default) : "—";
+        lines.push(`| \`${p.name}\` | ${p.type} | ${def} | ${p.description} |`);
+      });
+    }
+    lines.push("");
+    return lines;
+  }),
   "## MCP Tools",
   "",
   ...manifest.tools.map((t) => `- **${t.name}** — ${t.description}`),
+  "",
+  "## Recipes",
+  "",
+  "**Change materials to gold metallic:**",
+  "```json",
+  '{"cmd": "set", "resource": "Material:TowerExtension",',
+  ' "value": {"base_color":{"Srgba":{"red":1.0,"green":0.84,"blue":0.0,"alpha":1.0}},"metallic":1.0}}',
+  "```",
+  "",
+  "**Switch active model:**",
+  "```json",
+  '{"cmd": "set", "resource": "CadGeneratedModelSpawner",',
+  ` "value": {"selected_params": "${modelName(manifest.models[0])}"}}`,
+  "```",
+  "",
+  "**Reposition geometry:**",
+  "```json",
+  '{"cmd": "set", "resource": "Transform", "value": {"translation": [1.0, 0.0, 0.0], "scale": [2.0, 2.0, 2.0]}}',
+  "```",
+  "",
+  "**Pause simulation time:**",
+  '```json',
+  '{"cmd": "set", "resource": "Time<Virtual>", "value": {"context": {"paused": true}}}',
+  "```",
+  "",
+  "## Tips",
+  "",
+  "- Always call `get_schema` before `set_resource` — field names must match exactly",
+  "- `set_resource` is a merge patch — omitted fields keep their current values",
+  "- Materials use `Material:<ModelName>` naming, e.g. `Material:TowerExtension`",
+  "- Multi-model scenes have separate entities — `list_resources` shows all",
+  "- `screenshot` returns a base64 PNG data URL — use it to verify every change",
   "",
 ].join("\n");
 
@@ -165,7 +212,7 @@ async function agentRoutes(url) {
     const entries = [
       `  <url><loc>${origin}/</loc></url>`,
       ...manifest.models.map(
-        (m) => `  <url><loc>${origin}/?model=${m}</loc></url>`,
+        (m) => `  <url><loc>${origin}/?model=${modelName(m)}</loc></url>`,
       ),
     ].join("\n");
     return new Response(
@@ -435,7 +482,11 @@ export default {
         "",
         "## Models",
         "",
-        ...manifest.models.map((m) => `- [${m}](${o}/?model=${m})`),
+        ...manifest.models.flatMap((m) => {
+          const n = modelName(m);
+          const line = `- [${n}](${o}/?model=${n})`;
+          return m.description ? [line + " — " + m.description] : [line];
+        }),
         "",
         "## API",
         "",

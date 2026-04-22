@@ -1,28 +1,76 @@
 {
   "name": "pmetra",
   "version": "0.1.0",
-  "description": "AI-driven parametric CAD — control 3D geometry via MCP tools",
+  "description": "AI-driven parametric CAD — control 3D geometry via MCP tools. Send commands to POST /call, observe results via screenshot.",
   "models": [
-    "TowerExtension",
-    "ExpNurbsSolid",
-    "RoundCabinSegment",
-    "SimplCubeAtCylinder",
-    "MultiModelsSimplCubeAtCylinderAndTowerExtension",
-    "MultiModels2TowerExtensions"
+    {
+      "name": "TowerExtension",
+      "description": "Rectangular lattice tower — 4 L-section corner beams with diagonal cross-bracing",
+      "parameters": [
+        { "name": "tower_length",                    "type": "f64", "default": 1.0,  "min": 0.1, "description": "Tower height (Y-axis)" },
+        { "name": "straight_beam_l_sect_side_len",   "type": "f64", "default": 0.05, "min": 0.1, "description": "Corner beam L-section side length" },
+        { "name": "straight_beam_l_sect_thickness",  "type": "f64", "default": 0.01, "min": 0.1, "description": "Corner beam L-section thickness" },
+        { "name": "cross_beam_l_sect_side_len",      "type": "f64", "default": 0.05, "min": 0.1, "description": "Cross beam L-section side length" },
+        { "name": "cross_beam_l_sect_thickness",     "type": "f64", "default": 0.01, "min": 0.1, "description": "Cross beam L-section thickness" },
+        { "name": "enclosure_profile_width",         "type": "f64", "default": 0.5,  "min": 0.1, "description": "Enclosure width (X-axis)" },
+        { "name": "enclosure_profile_depth",         "type": "f64", "default": 0.5,  "min": 0.1, "description": "Enclosure depth (Z-axis)" }
+      ]
+    },
+    {
+      "name": "ExpNurbsSolid",
+      "description": "Freeform NURBS surface with 8 draggable control points, extruded to a solid",
+      "parameters": [
+        { "name": "control_point_spacing", "type": "f64",       "default": 1.0,  "min": 0.1, "description": "X-axis spacing between control points" },
+        { "name": "surface_length",        "type": "f64",       "default": 2.0,  "min": 0.1, "description": "Surface span (Z-axis)" },
+        { "name": "surface_thickness",     "type": "f64",       "default": 0.15, "min": 0.1, "description": "Solid extrusion thickness" },
+        { "name": "control_points",        "type": "[DVec3;8]", "description": "8 XYZ control points — points 0-3 front (z=0), 4-7 back (z=surface_length)" }
+      ]
+    },
+    {
+      "name": "RoundCabinSegment",
+      "description": "Space station cabin — rounded rectangular tube with wall thickness and a movable window cutout",
+      "parameters": [
+        { "name": "profile_width",          "type": "f64",    "default": 1.3,  "min": 0.1,  "description": "Cabin width (X-axis)" },
+        { "name": "profile_height",         "type": "f64",    "default": 1.0,  "min": 0.1,  "description": "Cabin height (Y-axis)" },
+        { "name": "profile_corner_radius",  "type": "f64",    "default": 0.1,  "min": 0.01, "description": "Corner rounding radius" },
+        { "name": "profile_thickness",      "type": "f64",    "default": 0.03, "min": 0.01, "description": "Wall thickness" },
+        { "name": "profile_extrude_length", "type": "f64",    "default": 1.2,  "min": 0.1,  "description": "Cabin length (Z-axis)" },
+        { "name": "window.profile_width",   "type": "f64",    "default": 0.5,  "min": 0.2,  "description": "Window width" },
+        { "name": "window.profile_height",  "type": "f64",    "default": 0.4,  "min": 0.2,  "description": "Window height" }
+      ]
+    },
+    {
+      "name": "SimplCubeAtCylinder",
+      "description": "Central cylinder with cubes attached around its circumference — cube count scales with radius",
+      "parameters": [
+        { "name": "cylinder_radius",   "type": "f64", "default": 1.2,    "min": 0.1,          "description": "Cylinder radius (cube count = floor(radius × 4))" },
+        { "name": "cylinder_height",   "type": "f64", "default": 0.5,    "min": 0.1,          "description": "Cylinder height (Y-axis)" },
+        { "name": "cube_attach_angle", "type": "f64", "default": 3.1416, "min": 0, "max": 6.2832, "description": "Angle (radians) where cubes attach around cylinder" },
+        { "name": "cube_side_length",  "type": "f64", "default": 0.2,    "min": 0.1,          "description": "Side length of each attached cube" }
+      ]
+    },
+    {
+      "name": "MultiModelsSimplCubeAtCylinderAndTowerExtension",
+      "description": "Two models in one scene — SimplCubeAtCylinder + TowerExtension, each independently controllable"
+    },
+    {
+      "name": "MultiModels2TowerExtensions",
+      "description": "Two TowerExtension instances in one scene — demonstrates multi-entity control"
+    }
   ],
   "tools": [
-    { "name": "list_resources", "description": "List all exposed resources, components, and materials" },
-    { "name": "get_resource", "description": "Get current value of a resource or component", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
-    { "name": "set_resource", "description": "Patch a resource or component — triggers geometry rebuild", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" }, "value": { "type": "object" } }, "required": ["name", "value"] } },
-    { "name": "screenshot", "description": "Capture PNG screenshot of the 3D viewport" },
-    { "name": "get_schema", "description": "Get field-level schema for a registered type", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } } } },
-    { "name": "load_shape", "description": "Load Truck JSON geometry into the scene", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" }, "data": { "type": "string" } }, "required": ["name", "data"] } },
-    { "name": "save_shape", "description": "Save a shape back to Truck JSON", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
-    { "name": "list_shapes", "description": "List all loaded shapes" },
-    { "name": "load_step", "description": "Load a STEP file into the scene", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" }, "data": { "type": "string" } }, "required": ["name", "data"] } },
-    { "name": "save_step", "description": "Export a shape as STEP", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
-    { "name": "delete_shape", "description": "Remove a shape from the scene", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
-    { "name": "simulate_touch", "description": "Dispatch synthetic touch on the 3D canvas", "inputSchema": { "type": "object", "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "end_x": { "type": "number" }, "end_y": { "type": "number" }, "duration_ms": { "type": "number" } }, "required": ["x", "y"] } }
+    { "name": "list_resources", "description": "List all exposed resources, components, and materials. Call this first to discover what you can control." },
+    { "name": "get_resource", "description": "Get current JSON value of a resource or component. Use the short name from list_resources.", "inputSchema": { "type": "object", "properties": { "name": { "type": "string", "description": "Short name, e.g. 'TowerExtension', 'GlobalAmbientLight', 'Material:TowerExtension'" } }, "required": ["name"] } },
+    { "name": "set_resource", "description": "Patch a resource or component — only provided fields change, others keep current values. Triggers geometry rebuild for CAD params.", "inputSchema": { "type": "object", "properties": { "name": { "type": "string", "description": "Short name from list_resources" }, "value": { "type": "object", "description": "Fields to update, e.g. {\"tower_length\": 3.0}" } }, "required": ["name", "value"] } },
+    { "name": "screenshot", "description": "Capture PNG screenshot of the 3D viewport. Returns base64 data URL. Use after set_resource to verify changes." },
+    { "name": "get_schema", "description": "Get field names, types, and defaults for a registered type. Call before set_resource to discover valid fields. Use '*' for all types.", "inputSchema": { "type": "object", "properties": { "name": { "type": "string", "description": "Type name, e.g. 'TowerExtension', or '*' for all" } } } },
+    { "name": "load_shape", "description": "Load Truck JSON geometry (CompressedShell or CompressedSolid) into the scene as a rendered mesh", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" }, "data": { "type": "string", "description": "Full Truck JSON content" } }, "required": ["name", "data"] } },
+    { "name": "save_shape", "description": "Serialize a loaded TruckModel back to Truck JSON", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
+    { "name": "list_shapes", "description": "List all loaded Truck shapes (both JSON and STEP imports)" },
+    { "name": "load_step", "description": "Load a STEP file (ISO-10303-21) into the scene. View-only — raw STEP data stored for re-export.", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" }, "data": { "type": "string", "description": "Full STEP file content" } }, "required": ["name", "data"] } },
+    { "name": "save_step", "description": "Export a loaded StepModel's raw STEP data", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
+    { "name": "delete_shape", "description": "Remove a shape from the scene — despawns entity and removes from localStorage", "inputSchema": { "type": "object", "properties": { "name": { "type": "string" } }, "required": ["name"] } },
+    { "name": "simulate_touch", "description": "Dispatch synthetic touch/drag on the 3D canvas. Omit end_x/end_y for a tap; provide them for a drag.", "inputSchema": { "type": "object", "properties": { "x": { "type": "number", "description": "Touch start X (canvas pixels)" }, "y": { "type": "number", "description": "Touch start Y (canvas pixels)" }, "end_x": { "type": "number", "description": "Touch end X (omit for tap)" }, "end_y": { "type": "number", "description": "Touch end Y (omit for tap)" }, "duration_ms": { "type": "number", "description": "Drag duration in ms (default 300)" } }, "required": ["x", "y"] } }
   ],
   "skills": [
     {
