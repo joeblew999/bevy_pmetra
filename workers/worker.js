@@ -333,6 +333,37 @@ async function agentRoutes(url) {
   return null;
 }
 
+// ── Markdown overview — shared by /docs and Accept: text/markdown ────────────
+
+function buildOverviewMd(origin) {
+  return [
+    `# ${manifest.name}`,
+    "",
+    manifest.description,
+    "",
+    "## Models",
+    "",
+    ...manifest.models.flatMap((m) => {
+      const n = modelName(m);
+      const line = `- [${n}](${origin}/?model=${n})`;
+      return m.description ? [line + " — " + m.description] : [line];
+    }),
+    "",
+    "## API",
+    "",
+    `- \`POST ${origin}/call\` — send commands to the CAD engine`,
+    `- \`GET ${origin}/health\` — server status`,
+    `- [MCP Server Card](${origin}/.well-known/mcp/server-card.json)`,
+    `- [Agent Card](${origin}/.well-known/agent-card.json)`,
+    `- [Skill details](${origin}/.well-known/agent-skills/cad-control/SKILL.md)`,
+    "",
+    "## MCP Tools",
+    "",
+    ...manifest.tools.map((t) => `- **${t.name}** — ${t.description}`),
+    "",
+  ].join("\n");
+}
+
 // ── Durable Object: single-slot WebSocket broker ────────────────────────────
 //
 // Holds the WASM app's WebSocket connection. /call sends a command via the WS,
@@ -468,39 +499,13 @@ export default {
     const agentResp = await agentRoutes(url);
     if (agentResp) return agentResp;
 
-    // Markdown content negotiation — agents requesting text/markdown
-    // get a structured description instead of the WASM app HTML.
+    // Markdown overview — /docs (browseable) or / with Accept: text/markdown.
     if (
-      url.pathname === "/" &&
-      request.headers.get("accept")?.includes("text/markdown")
+      url.pathname === "/docs" ||
+      (url.pathname === "/" &&
+        request.headers.get("accept")?.includes("text/markdown"))
     ) {
-      const o = url.origin;
-      const md = [
-        `# ${manifest.name}`,
-        "",
-        manifest.description,
-        "",
-        "## Models",
-        "",
-        ...manifest.models.flatMap((m) => {
-          const n = modelName(m);
-          const line = `- [${n}](${o}/?model=${n})`;
-          return m.description ? [line + " — " + m.description] : [line];
-        }),
-        "",
-        "## API",
-        "",
-        `- \`POST ${o}/call\` — send commands to the CAD engine`,
-        `- \`GET ${o}/health\` — server status`,
-        `- [MCP Server Card](${o}/.well-known/mcp/server-card.json)`,
-        `- [Agent Card](${o}/.well-known/agent-card.json)`,
-        "",
-        "## MCP Tools",
-        "",
-        ...manifest.tools.map((t) => `- **${t.name}** — ${t.description}`),
-        "",
-      ].join("\n");
-      return new Response(md, {
+      return new Response(buildOverviewMd(url.origin), {
         headers: {
           "content-type": "text/markdown; charset=utf-8",
           link: LINK_HEADER,
